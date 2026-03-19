@@ -53,6 +53,6 @@
 - 第一次安裝需連網
 
 **Windows**
-- Windows 10 以上
+- **Windows 10 以上**（不支援 Windows 7 / 8 / 8.1）
 - Python 3.9+（首次安裝時若未安裝，會自動透過 winget 安裝）
 - 第一次安裝需連網
