@@ -1,0 +1,19 @@
+# 開發版與舊版存檔不上傳
+Whisper_開發版_整理版/
+archive_old_*/
+
+# 安裝版裡不需上傳的內容
+**/models/*.pt
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.deps_ready
+
+# macOS 系統檔
+.DS_Store
+**/.DS_Store
+._*
+**/._*
+
+# 打包壓縮檔
+*.zip

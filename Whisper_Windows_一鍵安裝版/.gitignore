@@ -1,0 +1,8 @@
+.venv/
+ffmpeg/*
+models/*
+__pycache__/
+*.zip
+ffmpeg_extract/
+!ffmpeg/.gitkeep
+!models/.gitkeep
