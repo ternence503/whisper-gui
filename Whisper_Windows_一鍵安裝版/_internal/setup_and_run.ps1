@@ -211,14 +211,20 @@ function Launch-App {
 }
 
 function Create-DesktopShortcut {
-    $shortcutPath = Join-Path $env:USERPROFILE "Desktop\Whisper 語音工具.lnk"
-    if (Test-Path $shortcutPath) { return }
     try {
-        $batFile = Join-Path (Split-Path $ScriptRoot -Parent) "▶ 啟動 Whisper.bat"
         $WshShell = New-Object -ComObject WScript.Shell
+        # Use SpecialFolders to correctly handle OneDrive Desktop redirection
+        $desktopPath = $WshShell.SpecialFolders("Desktop")
+        $shortcutPath = Join-Path $desktopPath "Whisper 語音工具.lnk"
+        if (Test-Path $shortcutPath) { return }
+
+        $batFile = Join-Path (Split-Path $ScriptRoot -Parent) "▶ 啟動 Whisper.bat"
         $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-        $Shortcut.TargetPath = $batFile
+        # Use cmd.exe as target to avoid Unicode filename issues in TargetPath
+        $Shortcut.TargetPath = "cmd.exe"
+        $Shortcut.Arguments = "/c `"$batFile`""
         $Shortcut.WorkingDirectory = Split-Path $batFile -Parent
+        $Shortcut.WindowStyle = 7  # minimised — hides the cmd flash
         $Shortcut.Description = "Whisper 語音工具"
         $Shortcut.Save()
         Write-Host "Desktop shortcut created: Whisper 語音工具" -ForegroundColor Green
