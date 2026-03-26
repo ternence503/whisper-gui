@@ -99,6 +99,7 @@ PY
 
 ensure_runtime_dependencies() {
   ensure_homebrew
+  ensure_formula "tcl-tk"
   ensure_formula "python@3.12"
   ensure_formula "ffmpeg"
 }
@@ -183,7 +184,7 @@ if [[ "$ONLY_LAUNCH" -eq 0 ]]; then
     echo "[步驟 2/3] 安裝 Python 套件（含 openai-whisper，請耐心等候）..."
     ensure_venv_and_packages "$BASE_PYTHON"
 
-    echo "[步驟 3/3] 下載 Whisper 語音模型（$MODEL）..."
+    echo "[步驟 3/3] 下載 Whisper 語音模型 (${MODEL})..."
     ensure_model
 
     echo ""
