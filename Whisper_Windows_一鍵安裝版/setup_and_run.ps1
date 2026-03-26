@@ -193,6 +193,10 @@ function Launch-App {
 
     Write-Step "Launching Whisper GUI..."
     & $VenvPython $GuiScript
+    $appExit = $LASTEXITCODE
+    if ($appExit -ne 0) {
+        throw "Application exited with error code $appExit. Check the output above for details."
+    }
 }
 
 try {
