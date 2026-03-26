@@ -201,15 +201,37 @@ function Launch-App {
 
 try {
     if (-not $OnlyLaunch) {
-        Ensure-VenvAndPackages
-        Install-FfmpegLocally
-        Ensure-Model -ModelName $Model
-        Write-Host ""
-        Write-Host "=====================================" -ForegroundColor Green
-        Write-Host "  安裝完成！程式即將自動開啟。" -ForegroundColor Green
-        Write-Host "  下次只需雙擊 02-start-app.bat 即可直接啟動。" -ForegroundColor Green
-        Write-Host "=====================================" -ForegroundColor Green
-        Write-Host ""
+        $modelFile = Join-Path $ModelsDir "$Model.pt"
+        $alreadyInstalled = (Test-Path $DepsStamp) -and
+                            (Test-Path (Join-Path $FfmpegDir "ffmpeg.exe")) -and
+                            (Test-Path $modelFile)
+
+        if ($alreadyInstalled) {
+            Write-Host ""
+            Write-Host "環境已就緒，正在啟動程式..." -ForegroundColor Green
+            Write-Host ""
+        } else {
+            Write-Host ""
+            Write-Host "首次安裝，請稍候..." -ForegroundColor Yellow
+            Write-Host "（需下載 Python 套件、FFmpeg 與 Whisper 模型，約需幾分鐘，請保持網路連線）" -ForegroundColor Yellow
+            Write-Host ""
+
+            Write-Step "[步驟 1/3] 安裝 Python 套件（含 torch，約 500MB，請耐心等候）..."
+            Ensure-VenvAndPackages
+
+            Write-Step "[步驟 2/3] 下載 FFmpeg（約 80MB）..."
+            Install-FfmpegLocally
+
+            Write-Step "[步驟 3/3] 下載 Whisper 語音模型（$Model）..."
+            Ensure-Model -ModelName $Model
+
+            Write-Host ""
+            Write-Host "=====================================" -ForegroundColor Green
+            Write-Host "  安裝完成！程式即將自動開啟。" -ForegroundColor Green
+            Write-Host "  下次只需雙擊 02-start-app.bat 即可直接啟動。" -ForegroundColor Green
+            Write-Host "=====================================" -ForegroundColor Green
+            Write-Host ""
+        }
     }
     Launch-App
     exit 0
