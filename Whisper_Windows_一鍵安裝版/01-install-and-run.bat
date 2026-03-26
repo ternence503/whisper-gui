@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 > nul
 setlocal
 
 set SCRIPT_DIR=%~dp0
@@ -8,12 +7,12 @@ set EXIT_CODE=%ERRORLEVEL%
 
 if NOT "%EXIT_CODE%"=="0" (
   echo.
-  echo 安裝或啟動失敗，請把上方訊息截圖後回傳。
+  echo [ERROR] Installation or launch failed. Please screenshot this window and send for help.
   pause
   exit /b %EXIT_CODE%
 )
 
 echo.
-echo 程式已結束。按任意鍵關閉視窗。
+echo Done. Press any key to close.
 pause
 exit /b 0

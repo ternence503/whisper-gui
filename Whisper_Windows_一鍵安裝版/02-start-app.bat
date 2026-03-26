@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 > nul
 setlocal
 
 set SCRIPT_DIR=%~dp0
@@ -8,13 +7,13 @@ set EXIT_CODE=%ERRORLEVEL%
 
 if NOT "%EXIT_CODE%"=="0" (
   echo.
-  echo 啟動失敗，請把上方訊息截圖後回傳。
-  echo 若尚未安裝，請先執行 01-install-and-run.bat。
+  echo [ERROR] Launch failed. Please run 01-install-and-run.bat first if not yet installed.
+  echo         Screenshot this window and send for help if the problem persists.
   pause
   exit /b %EXIT_CODE%
 )
 
 echo.
-echo 程式已結束。按任意鍵關閉視窗。
+echo Done. Press any key to close.
 pause
 exit /b 0
