@@ -204,6 +204,12 @@ try {
         Ensure-VenvAndPackages
         Install-FfmpegLocally
         Ensure-Model -ModelName $Model
+        Write-Host ""
+        Write-Host "=====================================" -ForegroundColor Green
+        Write-Host "  安裝完成！程式即將自動開啟。" -ForegroundColor Green
+        Write-Host "  下次只需雙擊 02-start-app.bat 即可直接啟動。" -ForegroundColor Green
+        Write-Host "=====================================" -ForegroundColor Green
+        Write-Host ""
     }
     Launch-App
     exit 0
