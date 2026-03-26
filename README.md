@@ -29,10 +29,10 @@
 ## 介面截圖
 
 ### 語音轉字幕
-![語音轉字幕](docs/screenshot_transcribe.png)
+![語音轉字幕](docs/screenshot_transcribe.jpg)
 
 ### 文字轉語音
-![文字轉語音](docs/screenshot_tts.png)
+![文字轉語音](docs/screenshot_tts.jpg)
 
 ---
 
