@@ -8,15 +8,17 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$VenvDir = Join-Path $ScriptRoot ".venv"
+# Store environment in a fixed user-level location so re-downloading the zip never triggers reinstall
+$AppDataDir = Join-Path $env:LOCALAPPDATA "WhisperGui"
+$VenvDir = Join-Path $AppDataDir ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $DepsStamp = Join-Path $VenvDir ".deps_ready"
 $InstalledVersionFile = Join-Path $VenvDir ".installed_version"
+$ModelsDir = Join-Path $AppDataDir "models"
+$FfmpegDir = Join-Path $AppDataDir "ffmpeg"
 $VersionFile = Join-Path $ScriptRoot "version.txt"
 $RequirementsFile = Join-Path $ScriptRoot "requirements-win.txt"
 $GuiScript = Join-Path $ScriptRoot "whisper_gui_win.py"
-$ModelsDir = Join-Path $ScriptRoot "models"
-$FfmpegDir = Join-Path $ScriptRoot "ffmpeg"
 $ModelDownloader = Join-Path $ScriptRoot "download_model.py"
 
 $CurrentVersion = if (Test-Path $VersionFile) { (Get-Content $VersionFile -Raw).Trim() } else { "unknown" }
@@ -137,6 +139,10 @@ function Install-FfmpegLocally {
 
 function Ensure-VenvAndPackages {
     $basePython = Install-PythonIfMissing
+
+    if (-not (Test-Path $AppDataDir)) {
+        New-Item -ItemType Directory -Path $AppDataDir | Out-Null
+    }
 
     if (-not (Test-Path $VenvPython)) {
         Write-Step "Creating local virtual environment..."

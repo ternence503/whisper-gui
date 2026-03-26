@@ -8,15 +8,17 @@ if [[ -n "${1:-}" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.venv"
+# Store environment in a fixed user-level location so re-downloading the zip never triggers reinstall
+APP_DATA_DIR="$HOME/Library/Application Support/WhisperGUI"
+VENV_DIR="$APP_DATA_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 DEPS_STAMP="$VENV_DIR/.deps_ready"
 INSTALLED_VERSION_FILE="$VENV_DIR/.installed_version"
+MODELS_DIR="$APP_DATA_DIR/models"
 VERSION_FILE="$SCRIPT_DIR/version.txt"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements-mac.txt"
 GUI_SCRIPT="$SCRIPT_DIR/whisper_gui_mac.py"
 MODEL_DOWNLOADER="$SCRIPT_DIR/download_model.py"
-MODELS_DIR="$SCRIPT_DIR/models"
 
 CURRENT_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")"
 
@@ -101,6 +103,7 @@ ensure_runtime_dependencies() {
   ensure_formula "python@3.12"
   ensure_formula "python-tk@3.12"
   ensure_formula "ffmpeg"
+  mkdir -p "$APP_DATA_DIR"
 }
 
 ensure_venv_and_packages() {
