@@ -815,7 +815,8 @@ class WhisperApp:
         spoken = spoken.replace("?", " 問號 ")
         spoken = spoken.replace("=", " 等於 ")
         spoken = spoken.replace("&", " 和 ")
-        return f"網址 {re.sub(r'\\s+', ' ', spoken).strip()}"
+        spoken = re.sub(r'\s+', ' ', spoken).strip()
+        return f"網址 {spoken}"
 
     def _normalize_tts_paragraphs(self, text: str) -> str:
         lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
