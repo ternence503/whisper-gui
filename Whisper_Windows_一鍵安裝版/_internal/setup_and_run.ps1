@@ -278,8 +278,8 @@ try {
             Write-Host "=====================================" -ForegroundColor Green
             Write-Host ""
 
-            Create-DesktopShortcut
         }
+        Create-DesktopShortcut
     }
     Launch-App
     exit 0
