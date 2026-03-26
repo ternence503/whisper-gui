@@ -11,11 +11,16 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VenvDir = Join-Path $ScriptRoot ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $DepsStamp = Join-Path $VenvDir ".deps_ready"
+$InstalledVersionFile = Join-Path $VenvDir ".installed_version"
+$VersionFile = Join-Path $ScriptRoot "version.txt"
 $RequirementsFile = Join-Path $ScriptRoot "requirements-win.txt"
 $GuiScript = Join-Path $ScriptRoot "whisper_gui_win.py"
 $ModelsDir = Join-Path $ScriptRoot "models"
 $FfmpegDir = Join-Path $ScriptRoot "ffmpeg"
 $ModelDownloader = Join-Path $ScriptRoot "download_model.py"
+
+$CurrentVersion = if (Test-Path $VersionFile) { (Get-Content $VersionFile -Raw).Trim() } else { "unknown" }
+$InstalledVersion = if (Test-Path $InstalledVersionFile) { (Get-Content $InstalledVersionFile -Raw).Trim() } else { "" }
 
 function Write-Step([string]$Message) {
     Write-Host "[Whisper Win] $Message" -ForegroundColor Cyan
@@ -199,21 +204,45 @@ function Launch-App {
     }
 }
 
+function Create-DesktopShortcut {
+    $shortcutPath = Join-Path $env:USERPROFILE "Desktop\Whisper 語音工具.lnk"
+    if (Test-Path $shortcutPath) { return }
+    try {
+        $batFile = Join-Path (Split-Path $ScriptRoot -Parent) "▶ 啟動 Whisper.bat"
+        $WshShell = New-Object -ComObject WScript.Shell
+        $Shortcut = $WshShell.CreateShortcut($shortcutPath)
+        $Shortcut.TargetPath = $batFile
+        $Shortcut.WorkingDirectory = Split-Path $batFile -Parent
+        $Shortcut.Description = "Whisper 語音工具"
+        $Shortcut.Save()
+        Write-Host "Desktop shortcut created: Whisper 語音工具" -ForegroundColor Green
+    } catch {
+        # non-critical, ignore
+    }
+}
+
 try {
     if (-not $OnlyLaunch) {
         $modelFile = Join-Path $ModelsDir "$Model.pt"
         $alreadyInstalled = (Test-Path $DepsStamp) -and
                             (Test-Path (Join-Path $FfmpegDir "ffmpeg.exe")) -and
-                            (Test-Path $modelFile)
+                            (Test-Path $modelFile) -and
+                            ($InstalledVersion -eq $CurrentVersion)
 
         if ($alreadyInstalled) {
             Write-Host ""
             Write-Host "Environment ready. Launching app..." -ForegroundColor Green
             Write-Host ""
         } else {
+            $isUpgrade = $InstalledVersion -ne "" -and $InstalledVersion -ne $CurrentVersion
+
             Write-Host ""
-            Write-Host "First-time setup. Please wait..." -ForegroundColor Yellow
-            Write-Host "(Downloading Python packages, FFmpeg and Whisper model. Keep network connected.)" -ForegroundColor Yellow
+            if ($isUpgrade) {
+                Write-Host "New version detected ($InstalledVersion -> $CurrentVersion). Updating..." -ForegroundColor Yellow
+            } else {
+                Write-Host "First-time setup. Please wait..." -ForegroundColor Yellow
+                Write-Host "(Downloading Python packages, FFmpeg and Whisper model. Keep network connected.)" -ForegroundColor Yellow
+            }
             Write-Host ""
 
             Write-Step "[Step 1/3] Installing Python packages (including torch, ~500MB)..."
@@ -225,12 +254,19 @@ try {
             Write-Step "[Step 3/3] Downloading Whisper model ($Model)..."
             Ensure-Model -ModelName $Model
 
+            Set-Content $InstalledVersionFile $CurrentVersion
+
             Write-Host ""
             Write-Host "=====================================" -ForegroundColor Green
-            Write-Host "  Setup complete! Launching app now." -ForegroundColor Green
-            Write-Host "  Next time, just double-click 02-start-app.bat." -ForegroundColor Green
+            if ($isUpgrade) {
+                Write-Host "  Update complete! Launching app now." -ForegroundColor Green
+            } else {
+                Write-Host "  Setup complete! Launching app now." -ForegroundColor Green
+            }
             Write-Host "=====================================" -ForegroundColor Green
             Write-Host ""
+
+            Create-DesktopShortcut
         }
     }
     Launch-App

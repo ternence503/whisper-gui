@@ -2,12 +2,6 @@
 set -euo pipefail
 
 MODEL="small"
-ONLY_LAUNCH=0
-
-if [[ "${1:-}" == "--only-launch" ]]; then
-  ONLY_LAUNCH=1
-  shift
-fi
 
 if [[ -n "${1:-}" ]]; then
   MODEL="$1"
@@ -17,10 +11,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 DEPS_STAMP="$VENV_DIR/.deps_ready"
+INSTALLED_VERSION_FILE="$VENV_DIR/.installed_version"
+VERSION_FILE="$SCRIPT_DIR/version.txt"
 REQUIREMENTS_FILE="$SCRIPT_DIR/requirements-mac.txt"
 GUI_SCRIPT="$SCRIPT_DIR/whisper_gui_mac.py"
 MODEL_DOWNLOADER="$SCRIPT_DIR/download_model.py"
 MODELS_DIR="$SCRIPT_DIR/models"
+
+CURRENT_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")"
 
 log_step() {
   echo "[Whisper Mac] $1"
@@ -152,7 +150,7 @@ ensure_model() {
 
 launch_gui() {
   if [[ ! -x "$VENV_PYTHON" ]]; then
-    echo "錯誤：找不到虛擬環境，請先執行 01-一鍵安裝並啟動.command。"
+    echo "錯誤：找不到虛擬環境，請重新雙擊「▶ 啟動 Whisper.command」安裝。"
     exit 1
   fi
 
@@ -164,47 +162,67 @@ launch_gui() {
   exec "$VENV_PYTHON" "$GUI_SCRIPT"
 }
 
-if [[ "$ONLY_LAUNCH" -eq 0 ]]; then
-  MODEL_FILE="$MODELS_DIR/$MODEL.pt"
-  ALREADY_INSTALLED=0
-  if [[ -f "$DEPS_STAMP" && -f "$MODEL_FILE" ]] && command -v ffmpeg >/dev/null 2>&1; then
-    if [[ -x "$VENV_PYTHON" ]] && "$VENV_PYTHON" -c "import tkinter" >/dev/null 2>&1; then
+MODEL_FILE="$MODELS_DIR/$MODEL.pt"
+ALREADY_INSTALLED=0
+INSTALLED_VERSION="$(cat "$INSTALLED_VERSION_FILE" 2>/dev/null || echo "")"
+
+if [[ -f "$DEPS_STAMP" && -f "$MODEL_FILE" ]] && command -v ffmpeg >/dev/null 2>&1; then
+  if [[ -x "$VENV_PYTHON" ]] && "$VENV_PYTHON" -c "import tkinter" >/dev/null 2>&1; then
+    if [[ "$INSTALLED_VERSION" == "$CURRENT_VERSION" ]]; then
       ALREADY_INSTALLED=1
     fi
   fi
+fi
 
-  if [[ "$ALREADY_INSTALLED" -eq 1 ]]; then
-    echo ""
-    echo "環境已就緒，正在啟動程式..."
-    echo ""
+if [[ "$ALREADY_INSTALLED" -eq 1 ]]; then
+  echo ""
+  echo "環境已就緒，正在啟動程式..."
+  echo ""
+else
+  IS_UPGRADE=0
+  if [[ -n "$INSTALLED_VERSION" && "$INSTALLED_VERSION" != "$CURRENT_VERSION" ]]; then
+    IS_UPGRADE=1
+  fi
+
+  echo ""
+  if [[ "$IS_UPGRADE" -eq 1 ]]; then
+    echo "偵測到新版本 ($INSTALLED_VERSION → $CURRENT_VERSION)，正在更新..."
   else
-    echo ""
     echo "首次安裝，請稍候..."
     echo "（需安裝 Homebrew、Python、ffmpeg 與 Whisper 模型，約需幾分鐘，請保持網路連線）"
-    echo ""
-
-    echo "[步驟 1/3] 安裝 Homebrew、Python 3.12、ffmpeg..."
-    ensure_runtime_dependencies
-    BASE_PYTHON="$(resolve_base_python)"
-    if [[ -z "${BASE_PYTHON:-}" || ! -x "$BASE_PYTHON" ]]; then
-      echo "錯誤：找不到可用的 python3。"
-      exit 1
-    fi
-    ensure_python_version "$BASE_PYTHON"
-
-    echo "[步驟 2/3] 安裝 Python 套件（含 openai-whisper，請耐心等候）..."
-    ensure_venv_and_packages "$BASE_PYTHON"
-
-    echo "[步驟 3/3] 下載 Whisper 語音模型 (${MODEL})..."
-    ensure_model
-
-    echo ""
-    echo "====================================="
-    echo "  安裝完成！程式即將自動開啟。"
-    echo "  下次只需雙擊「02-直接啟動.command」即可。"
-    echo "====================================="
-    echo ""
   fi
+  echo ""
+
+  echo "[步驟 1/3] 安裝 Homebrew、Python 3.12、ffmpeg..."
+  ensure_runtime_dependencies
+  BASE_PYTHON="$(resolve_base_python)"
+  if [[ -z "${BASE_PYTHON:-}" || ! -x "$BASE_PYTHON" ]]; then
+    echo "錯誤：找不到可用的 python3。"
+    exit 1
+  fi
+  ensure_python_version "$BASE_PYTHON"
+
+  echo "[步驟 2/3] 安裝 Python 套件（含 openai-whisper，請耐心等候）..."
+  ensure_venv_and_packages "$BASE_PYTHON"
+
+  echo "[步驟 3/3] 下載 Whisper 語音模型 (${MODEL})..."
+  ensure_model
+
+  # Save installed version
+  echo "$CURRENT_VERSION" > "$INSTALLED_VERSION_FILE"
+
+  echo ""
+  echo "====================================="
+  if [[ "$IS_UPGRADE" -eq 1 ]]; then
+    echo "  更新完成！程式即將自動開啟。"
+  else
+    echo "  安裝完成！程式即將自動開啟。"
+    echo ""
+    echo "  提示：把「▶ 啟動 Whisper.command」拖到 Dock，"
+    echo "  以後就像一般 App 一樣一鍵啟動！"
+  fi
+  echo "====================================="
+  echo ""
 fi
 
 launch_gui
