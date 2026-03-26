@@ -1,6 +1,7 @@
 # 開發版與舊版存檔不上傳
 Whisper_開發版_整理版/
 archive_old_*/
+backup_*/
 
 # 安裝版裡不需上傳的內容
 **/models/*.pt
