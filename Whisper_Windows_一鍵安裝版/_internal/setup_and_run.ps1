@@ -213,21 +213,22 @@ function Launch-App {
 function Create-DesktopShortcut {
     try {
         $WshShell = New-Object -ComObject WScript.Shell
-        # Use SpecialFolders to correctly handle OneDrive Desktop redirection
         $desktopPath = $WshShell.SpecialFolders("Desktop")
-        $shortcutPath = Join-Path $desktopPath "Whisper 語音工具.lnk"
+        # Remove any old "Whisper *.lnk" shortcuts (garbled name from previous version)
+        Get-ChildItem -Path $desktopPath -Filter "Whisper *.lnk" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+        $shortcutPath = Join-Path $desktopPath "Whisper.lnk"
         if (Test-Path $shortcutPath) { return }
 
-        $batFile = Join-Path (Split-Path $ScriptRoot -Parent) "▶ 啟動 Whisper.bat"
+        $psFile = Join-Path $ScriptRoot "setup_and_run.ps1"
         $Shortcut = $WshShell.CreateShortcut($shortcutPath)
-        # Use cmd.exe as target to avoid Unicode filename issues in TargetPath
-        $Shortcut.TargetPath = "cmd.exe"
-        $Shortcut.Arguments = "/c `"$batFile`""
-        $Shortcut.WorkingDirectory = Split-Path $batFile -Parent
-        $Shortcut.WindowStyle = 7  # minimised — hides the cmd flash
-        $Shortcut.Description = "Whisper 語音工具"
+        $Shortcut.TargetPath = "powershell.exe"
+        $Shortcut.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$psFile`""
+        $Shortcut.WorkingDirectory = Split-Path $psFile -Parent
+        $Shortcut.WindowStyle = 7
+        $Shortcut.Description = "Whisper Voice Tool"
         $Shortcut.Save()
-        Write-Host "Desktop shortcut created: Whisper 語音工具" -ForegroundColor Green
+        Write-Host "Desktop shortcut created: Whisper" -ForegroundColor Green
     } catch {
         # non-critical, ignore
     }
