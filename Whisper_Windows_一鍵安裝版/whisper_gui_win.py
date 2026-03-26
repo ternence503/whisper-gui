@@ -45,14 +45,24 @@ MEDIA_FILE_PATTERNS = (
 )
 
 APP_AUTHOR = "Ternence"
-APP_VERSION = "v1.1.0"
+APP_VERSION = "v1.2.0"
 APP_SIGNATURE = f"{APP_AUTHOR} {APP_VERSION}"
 TTS_VOICE_OPTIONS: Dict[str, str] = {
-    "中文女聲（活潑）": "zh-TW-HsiaoYuNeural",
-    "中文女聲（溫柔）": "zh-CN-XiaoxiaoNeural",
-    "中文女聲（清亮）": "zh-CN-XiaoyiNeural",
-    "中文男聲（穩重）": "zh-TW-YunJheNeural",
-    "中文男聲（陽光）": "zh-CN-YunxiNeural",
+    # 台灣腔
+    "台灣女聲・活潑": "zh-TW-HsiaoYuNeural",    # Friendly, Positive（台灣國語腔）
+    "台灣女聲・清亮": "zh-TW-HsiaoChenNeural",  # Friendly, Positive（台灣腔，咬字清晰）
+    "台灣男聲・沉穩": "zh-TW-YunJheNeural",     # Friendly, Positive（台灣男聲）
+    # 粵語腔
+    "粵語女聲・活潑": "zh-HK-HiuGaaiNeural",   # Friendly, Positive（粵語女聲，語氣輕快）
+    "粵語女聲・溫柔": "zh-HK-HiuMaanNeural",   # Friendly, Positive（粵語女聲，語氣柔和）
+    "粵語男聲・友善": "zh-HK-WanLungNeural",   # Friendly, Positive（粵語男聲）
+    # 普通話
+    "普通話女聲・活潑": "zh-CN-XiaoyiNeural",  # Lively
+    "普通話女聲・溫柔": "zh-CN-XiaoxiaoNeural", # Warm
+    "普通話男聲・熱情": "zh-CN-YunjianNeural",  # Passion
+    "普通話男聲・陽光": "zh-CN-YunxiNeural",   # Lively, Sunshine
+    "普通話男聲・穩重": "zh-CN-YunyangNeural",  # Professional, Reliable
+    "普通話男聲・可愛": "zh-CN-YunxiaNeural",  # Cute（偏童趣少年聲）
 }
 TTS_RATE_OPTIONS = ["-10%", "0%", "+5%", "+10%", "+20%", "+30%", "+40%", "+50%"]
 TTS_PITCH_OPTIONS = ["-2Hz", "0Hz", "+2Hz", "+4Hz"]
@@ -101,7 +111,8 @@ DEFAULT_OPTIONS = {
 def _format_timestamp(seconds: float, *, separator: str) -> str:
     if seconds is None:
         seconds = 0.0
-    milliseconds = round(float(seconds) * 1000)
+    seconds = max(0.0, float(seconds))
+    milliseconds = round(seconds * 1000)
     total_seconds, ms = divmod(milliseconds, 1000)
     minutes, sec = divmod(total_seconds, 60)
     hours, minutes = divmod(minutes, 60)
@@ -143,6 +154,7 @@ def _format_vtt(segments: Iterable[Dict[str, float]]) -> str:
 
 def _configure_runtime_environment() -> None:
     base_path = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__)
+    # Windows：搜尋根目錄與 ffmpeg/ 子目錄，同時確認 ffprobe.exe 存在
     ffmpeg_directories = [
         base_path,
         os.path.join(base_path, "ffmpeg"),
@@ -170,8 +182,9 @@ _ensure_stdio()
 class WhisperApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"Whisper 語音轉字幕工具 | {APP_SIGNATURE}")
+        self.root.title(f"Whisper 語音工具：語音轉字幕 ＆ 文字轉語音 | {APP_SIGNATURE}")
         self.root.geometry("860x820")
+        self.root.minsize(720, 600)
         self.model_cache: Dict[str, whisper.Whisper] = {}
         self.stop_event = threading.Event()
         self.worker_thread: Optional[threading.Thread] = None
@@ -186,7 +199,7 @@ class WhisperApp:
         self.converter_cache: Dict[str, object] = {}
         self.opencc_unavailable_notified = False
         self.edge_tts_unavailable_notified = False
-        self.tts_voice_label_var = tk.StringVar(value="中文女聲（活潑）")
+        self.tts_voice_label_var = tk.StringVar(value="台灣女聲・活潑")
         self.tts_rate_var = tk.StringVar(value="+5%")
         self.tts_pitch_var = tk.StringVar(value="+2Hz")
         self.tts_output_path_var = tk.StringVar()
@@ -272,8 +285,8 @@ class WhisperApp:
         tts_frame.bind("<Button-5>", on_mousewheel)
 
         tts_frame.columnconfigure(1, weight=1)
-        tts_frame.rowconfigure(6, weight=1)
-        tts_frame.rowconfigure(9, weight=1)
+        tts_frame.rowconfigure(5, weight=1)
+        tts_frame.rowconfigure(8, weight=1)
         self._build_tts_tab(tts_frame)
 
     def _build_transcribe_tab(self, frame: ttk.Frame) -> None:
@@ -369,6 +382,7 @@ class WhisperApp:
             textvariable=self.tts_voice_label_var,
             values=list(TTS_VOICE_OPTIONS.keys()),
             state="readonly",
+            width=20,
         )
         voice_box.grid(row=0, column=1, sticky="w")
 
@@ -385,7 +399,7 @@ class WhisperApp:
             values=TTS_RATE_OPTIONS,
             state="readonly",
             width=8,
-        ).grid(row=0, column=1, sticky="w", padx=(0, 16))
+        ).grid(row=0, column=1, sticky="w", padx=(0, 24))
 
         ttk.Label(controls, text="音高：").grid(row=0, column=2, sticky="w")
         ttk.Combobox(
@@ -396,14 +410,14 @@ class WhisperApp:
             width=8,
         ).grid(row=0, column=3, sticky="w")
 
-        ttk.Label(controls, text="輸出模式：").grid(row=0, column=4, sticky="w", padx=(16, 0))
+        ttk.Label(controls, text="輸出模式：").grid(row=1, column=0, sticky="w", pady=(10, 0))
         ttk.Combobox(
             controls,
             textvariable=self.tts_script_mode_var,
             values=list(TTS_SCRIPT_MODE_TARGETS.keys()),
             state="readonly",
-            width=14,
-        ).grid(row=0, column=5, sticky="w")
+            width=18,
+        ).grid(row=1, column=1, sticky="w", pady=(10, 0))
 
         ttk.Label(frame, text="輸出檔案：").grid(row=2, column=0, sticky="w", pady=(12, 0))
         output_row = ttk.Frame(frame)
@@ -471,8 +485,6 @@ class WhisperApp:
         tts_button_row.grid(row=9, column=0, columnspan=2, pady=(16, 12), sticky="ew")
         tts_button_row.columnconfigure(0, weight=1)
         tts_button_row.columnconfigure(1, weight=1)
-        tts_button_row.columnconfigure(2, weight=1)
-        tts_button_row.columnconfigure(3, weight=1)
         self.tts_start_button = ttk.Button(
             tts_button_row, text="產生音檔", command=self.start_tts_generation
         )
@@ -480,13 +492,7 @@ class WhisperApp:
         self.tts_stop_button = ttk.Button(
             tts_button_row, text="停止", command=self.stop_tts_generation, state=tk.DISABLED
         )
-        self.tts_stop_button.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        ttk.Button(tts_button_row, text="貼上剪貼簿", command=self.paste_tts_text).grid(
-            row=0, column=2, sticky="ew", padx=(0, 8)
-        )
-        ttk.Button(tts_button_row, text="清除", command=self.clear_tts_inputs).grid(
-            row=0, column=3, sticky="ew"
-        )
+        self.tts_stop_button.grid(row=0, column=1, sticky="ew")
 
         ttk.Label(frame, textvariable=self.tts_status_var, foreground="#1c5f2c").grid(
             row=10, column=0, columnspan=2, sticky="w"
@@ -532,18 +538,20 @@ class WhisperApp:
         )
         if not path:
             return
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                content = handle.read()
-        except UnicodeDecodeError:
+        content: Optional[str] = None
+        # 依序嘗試：utf-8-sig（含/不含 BOM 的 UTF-8）→ cp950（台灣繁體 Big5）→ gb18030（簡體）
+        for encoding in ("utf-8-sig", "cp950", "gb18030"):
             try:
-                with open(path, "r", encoding="utf-8-sig") as handle:
+                with open(path, "r", encoding=encoding, errors="strict") as handle:
                     content = handle.read()
-            except Exception as exc:  # pylint: disable=broad-except
-                messagebox.showerror("錯誤", f"無法讀取文字檔：{exc}")
-                return
-        except Exception as exc:  # pylint: disable=broad-except
-            messagebox.showerror("錯誤", f"無法讀取文字檔：{exc}")
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if content is None:
+            messagebox.showerror(
+                "錯誤",
+                "無法辨識文字檔編碼，請將檔案另存為 UTF-8 格式後再試。",
+            )
             return
 
         self.tts_text.delete("1.0", tk.END)
@@ -643,30 +651,29 @@ class WhisperApp:
         self.root.after(0, update)
 
     def _bind_text_shortcuts(self, widget: tk.Text) -> None:
+        # 只監聽 <<Paste>> 虛擬事件，不攔截鍵盤快捷鍵。
+        # tkinter 原生機制能正確讀取系統剪貼簿（含外部 app 複製的文字），
+        # 貼上完成後再補上預覽更新即可。
         widget.bind("<<Paste>>", self._handle_text_paste)
-        widget.bind("<Command-v>", self._handle_text_paste)
-        widget.bind("<Command-V>", self._handle_text_paste)
-        widget.bind("<Control-v>", self._handle_text_paste)
-        widget.bind("<Control-V>", self._handle_text_paste)
-        widget.bind("<Shift-Insert>", self._handle_text_paste)
 
-    def _handle_text_paste(self, _event=None) -> str:
-        self.paste_tts_text()
-        return "break"
+    def _handle_text_paste(self, _event=None) -> None:
+        # 不 return "break"，讓原生貼上先執行，10ms 後再更新預覽
+        self.root.after(10, self.refresh_tts_preview)
 
     def _handle_global_paste(self, _event=None) -> str | None:
         target = self.root.focus_get()
         if isinstance(target, tk.Text):
-            self.paste_tts_text()
-            return "break"
-        return None
+            # 焦點已在文字框，原生 <<Paste>> 會自己處理，不需要干預
+            return None
+        # 焦點不在文字框時（例如點了其他地方），才手動貼入 tts_text
+        self.paste_tts_text()
+        return "break"
 
     def paste_tts_text(self) -> None:
         try:
             clipboard = self.root.clipboard_get()
-        except tk.TclError:
-            messagebox.showwarning("提醒", "剪貼簿目前沒有可貼上的文字")
-            return
+        except Exception:  # pylint: disable=broad-except
+            clipboard = ""
         if not clipboard:
             messagebox.showwarning("提醒", "剪貼簿目前沒有可貼上的文字")
             return
@@ -756,7 +763,7 @@ class WhisperApp:
 
     @staticmethod
     def _read_digits(value: str) -> str:
-        return " ".join(TTS_DIGIT_MAP.get(char, char) for char in value if char.isdigit())
+        return "".join(TTS_DIGIT_MAP.get(char, char) for char in value if char.isdigit())
 
     @staticmethod
     def _format_spoken_hour(hour_text: str, meridiem: str) -> str:
@@ -804,10 +811,11 @@ class WhisperApp:
         spoken = spoken.replace("/", " slash ")
         spoken = spoken.replace("-", " dash ")
         spoken = spoken.replace("_", " underscore ")
+        spoken = spoken.replace("#", " 井號 ")
         spoken = spoken.replace("?", " 問號 ")
         spoken = spoken.replace("=", " 等於 ")
         spoken = spoken.replace("&", " 和 ")
-        return f"網址 {re.sub(r'\s+', ' ', spoken).strip()}"
+        return f"網址 {re.sub(r'\\s+', ' ', spoken).strip()}"
 
     def _normalize_tts_paragraphs(self, text: str) -> str:
         lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -836,6 +844,7 @@ class WhisperApp:
     def _optimize_tts_text(self, text: str) -> str:
         optimized = self._normalize_tts_paragraphs(text)
         optimized = re.sub(
+            r"(?<!\w)"
             r"(?P<start_meridiem>凌晨|清晨|早上|上午|中午|下午|晚上)?\s*"
             r"(?P<start_hour>[01]?\d|2[0-3])[:：](?P<start_minute>[0-5]\d)"
             r"(?:\s*[~-]\s*(?P<end_meridiem>凌晨|清晨|早上|上午|中午|下午|晚上)?\s*"
@@ -970,7 +979,7 @@ class WhisperApp:
         )
 
         min_sentences = 3 if len(sentences) >= 3 else len(sentences)
-        soft_limit = max(target_chars, int(target_chars * 1.15))
+        soft_limit = int(target_chars * 1.15)
         for _score, index, sentence in ranked:
             need_more_sentences = len(selected_indexes) < min_sentences
             fits_budget = total_length + len(sentence) <= soft_limit
@@ -1072,7 +1081,8 @@ class WhisperApp:
                 push(current)
                 current = ""
         push(current)
-        return chunks or [text.strip()]
+        result_chunks = [c for c in chunks if c] or [text.strip()]
+        return [c for c in result_chunks if c]
 
     def _ensure_tts_dependency(self) -> bool:
         if edge_tts is not None:
@@ -1095,6 +1105,13 @@ class WhisperApp:
             return
 
         output_path = self._get_tts_output_path()
+        if os.path.exists(output_path):
+            overwrite = messagebox.askyesno(
+                "檔案已存在",
+                f"輸出檔案已存在：\n{output_path}\n\n是否覆蓋？",
+            )
+            if not overwrite:
+                return
         self.tts_output_path_var.set(output_path)
         self.tts_stop_event.clear()
         self._update_tts_control_states(True)
@@ -1118,12 +1135,45 @@ class WhisperApp:
         if not self.tts_worker_thread or not self.tts_worker_thread.is_alive():
             return
         self.tts_stop_event.set()
-        self._update_tts_status("已請求停止，將在目前分段完成後停止...")
+        self._update_tts_status("停止中，請稍候...")
         self.tts_stop_button.config(state=tk.DISABLED)
 
     async def _save_tts_chunk(self, text: str, voice: str, rate: str, pitch: str, output_path: str) -> None:
         communicator = edge_tts.Communicate(text, voice=voice, rate=rate, pitch=pitch)
         await communicator.save(output_path)
+
+    async def _run_tts_chunks(
+        self,
+        chunks: List[str],
+        voice: str,
+        rate: str,
+        pitch: str,
+        temp_dir: str,
+    ) -> List[str]:
+        """依序合成各分段，每 0.1 秒檢查停止事件，可即時取消。"""
+        chunk_paths: List[str] = []
+        for index, chunk in enumerate(chunks, start=1):
+            if self.tts_stop_event.is_set():
+                raise SystemExit
+            chunk_path = os.path.join(temp_dir, f"{index:03d}.mp3")
+            self._update_tts_status(f"正在合成第 {index}/{len(chunks)} 段...")
+            task = asyncio.ensure_future(
+                self._save_tts_chunk(chunk, voice, rate, pitch, chunk_path)
+            )
+            while not task.done():
+                await asyncio.sleep(0.1)
+                if self.tts_stop_event.is_set():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass  # 取消時忽略 edge-tts 中途中斷的例外
+                    raise SystemExit
+            await task  # 傳遞 edge-tts 本身的例外
+            chunk_paths.append(chunk_path)
+        return chunk_paths
 
     def _find_ffmpeg(self) -> Optional[str]:
         local = os.path.join(os.path.dirname(__file__), "ffmpeg")
@@ -1136,23 +1186,22 @@ class WhisperApp:
         if ffmpeg_path is None:
             raise RuntimeError("找不到 ffmpeg，無法合併分段音檔。")
 
-        concat_file = os.path.join(os.path.dirname(output_path), ".tts_concat.txt")
-        with open(concat_file, "w", encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", encoding="utf-8", delete=False
+        ) as concat_handle:
+            concat_file = concat_handle.name
             for chunk_path in chunk_paths:
-                handle.write(f"file '{chunk_path}'\n")
+                escaped = chunk_path.replace("'", "'\\''")
+                concat_handle.write(f"file '{escaped}'\n")
         try:
             subprocess.run(
                 [
                     ffmpeg_path,
                     "-y",
-                    "-f",
-                    "concat",
-                    "-safe",
-                    "0",
-                    "-i",
-                    concat_file,
-                    "-c",
-                    "copy",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", concat_file,
+                    "-c", "copy",
                     output_path,
                 ],
                 check=True,
@@ -1164,21 +1213,17 @@ class WhisperApp:
                 os.remove(concat_file)
 
     def _tts_worker(self, text: str, voice: str, rate: str, pitch: str, output_path: str) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             chunks = self._chunk_tts_text(text)
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             self._update_tts_status(f"開始合成，共 {len(chunks)} 段...")
 
             with tempfile.TemporaryDirectory(prefix="whisper_tts_") as temp_dir:
-                chunk_paths: List[str] = []
-                for index, chunk in enumerate(chunks, start=1):
-                    if self.tts_stop_event.is_set():
-                        raise SystemExit
-                    chunk_path = os.path.join(temp_dir, f"{index:03d}.mp3")
-                    self._update_tts_status(f"正在合成第 {index}/{len(chunks)} 段...")
-                    asyncio.run(self._save_tts_chunk(chunk, voice, rate, pitch, chunk_path))
-                    chunk_paths.append(chunk_path)
-
+                chunk_paths = loop.run_until_complete(
+                    self._run_tts_chunks(chunks, voice, rate, pitch, temp_dir)
+                )
                 if len(chunk_paths) == 1:
                     shutil.copyfile(chunk_paths[0], output_path)
                 else:
@@ -1196,8 +1241,11 @@ class WhisperApp:
             message = str(exc)
             self.root.after(0, lambda: messagebox.showerror("錯誤", message))
         finally:
+            loop.close()
             self.tts_worker_thread = None
             self.tts_stop_event.clear()
+            # 完成後清空路徑，下次會重新根據內容產生新檔名，避免靜默覆蓋
+            self.root.after(0, lambda: self.tts_output_path_var.set(""))
             self.root.after(0, lambda: self._update_tts_control_states(False))
 
     def _transcribe_worker(
@@ -1217,7 +1265,7 @@ class WhisperApp:
                 raise SystemExit
 
             output_paths = self._write_outputs(audio_path, result)
-            detected_lang = result.get("language", "?")
+            detected_lang = result.get("language") or "unknown"
             self._update_status(
                 f"完成！偵測語言：{detected_lang}. 檔案已產生。"
             )
