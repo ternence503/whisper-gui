@@ -67,15 +67,16 @@ ensure_formula() {
 
 resolve_base_python() {
   ensure_brew_in_path
-  if command -v python3.12 >/dev/null 2>&1; then
-    command -v python3.12
-    return
-  fi
-
+  # Check Homebrew's python@3.12 first — it is built with tcl-tk/tkinter support
   local brew_python=""
   brew_python="$(brew --prefix python@3.12 2>/dev/null || true)"
   if [[ -n "$brew_python" && -x "$brew_python/bin/python3.12" ]]; then
     echo "$brew_python/bin/python3.12"
+    return
+  fi
+
+  if command -v python3.12 >/dev/null 2>&1; then
+    command -v python3.12
     return
   fi
 
@@ -99,14 +100,22 @@ PY
 
 ensure_runtime_dependencies() {
   ensure_homebrew
-  ensure_formula "tcl-tk"
   ensure_formula "python@3.12"
+  ensure_formula "python-tk@3.12"
   ensure_formula "ffmpeg"
 }
 
 ensure_venv_and_packages() {
   local base_python="$1"
   local needs_install=0
+
+  # If existing venv lacks tkinter (built with wrong Python), remove and recreate
+  if [[ -x "$VENV_PYTHON" ]]; then
+    if ! "$VENV_PYTHON" -c "import tkinter" >/dev/null 2>&1; then
+      log_step "虛擬環境缺少 tkinter，重建中..."
+      rm -rf "$VENV_DIR"
+    fi
+  fi
 
   if [[ ! -x "$VENV_PYTHON" ]]; then
     log_step "建立本地虛擬環境..."
@@ -159,7 +168,9 @@ if [[ "$ONLY_LAUNCH" -eq 0 ]]; then
   MODEL_FILE="$MODELS_DIR/$MODEL.pt"
   ALREADY_INSTALLED=0
   if [[ -f "$DEPS_STAMP" && -f "$MODEL_FILE" ]] && command -v ffmpeg >/dev/null 2>&1; then
-    ALREADY_INSTALLED=1
+    if [[ -x "$VENV_PYTHON" ]] && "$VENV_PYTHON" -c "import tkinter" >/dev/null 2>&1; then
+      ALREADY_INSTALLED=1
+    fi
   fi
 
   if [[ "$ALREADY_INSTALLED" -eq 1 ]]; then

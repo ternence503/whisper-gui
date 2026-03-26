@@ -216,30 +216,30 @@ class WhisperApp:
     def _build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self.root.bind_all("<Command-v>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Command-V>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Control-v>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Control-V>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Shift-Insert>", self._handle_global_paste, add="+")
+        self.root.bind_all("<<Paste>>", self._handle_global_paste, add="+")
+        for _seq in ("<Command-v>", "<Command-V>", "<Meta-v>", "<Meta-V>",
+                     "<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.root.bind_all(_seq, self._handle_global_paste, add="+")
 
         container = ttk.Frame(self.root, padding=16)
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(container)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook = ttk.Notebook(container)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        transcribe_frame = ttk.Frame(notebook, padding=20)
+        transcribe_frame = ttk.Frame(self.notebook, padding=20)
         transcribe_frame.columnconfigure(1, weight=1)
         transcribe_frame.rowconfigure(7, weight=1)
-        notebook.add(transcribe_frame, text="語音轉字幕")
+        self.notebook.add(transcribe_frame, text="語音轉字幕")
         self._build_transcribe_tab(transcribe_frame)
 
-        tts_outer = ttk.Frame(notebook)
+        tts_outer = ttk.Frame(self.notebook)
         tts_outer.columnconfigure(0, weight=1)
         tts_outer.rowconfigure(0, weight=1)
-        notebook.add(tts_outer, text="文字轉語音")
+        self.notebook.add(tts_outer, text="文字轉語音")
         self._build_tts_scrollable_tab(tts_outer)
 
     def _build_tts_scrollable_tab(self, parent: ttk.Frame) -> None:
@@ -278,6 +278,10 @@ class WhisperApp:
         tts_frame.bind("<MouseWheel>", on_mousewheel)
         tts_frame.bind("<Button-4>", on_mousewheel)
         tts_frame.bind("<Button-5>", on_mousewheel)
+
+        # Redirect focus to tts_text so Cmd+V works when clicking anywhere in TTS area
+        canvas.bind("<FocusIn>", lambda _e: self.tts_text.focus_set() if hasattr(self, "tts_text") else None)
+        canvas.bind("<Button-1>", lambda _e: self.tts_text.focus_set() if hasattr(self, "tts_text") else None)
 
         tts_frame.columnconfigure(1, weight=1)
         tts_frame.rowconfigure(5, weight=1)
@@ -645,22 +649,16 @@ class WhisperApp:
 
         self.root.after(0, update)
 
-    def _bind_text_shortcuts(self, widget: tk.Text) -> None:
-        # 只監聽 <<Paste>> 虛擬事件，不攔截鍵盤快捷鍵。
-        # tkinter 原生機制能正確讀取系統剪貼簿（含外部 app 複製的文字），
-        # 貼上完成後再補上預覽更新即可。
-        widget.bind("<<Paste>>", self._handle_text_paste)
+    def _on_tab_changed(self, _event=None) -> None:
+        # Auto-focus the TTS text box when switching to TTS tab so Cmd+V works immediately.
+        if hasattr(self, "tts_text") and self.notebook.index("current") == 1:
+            self.root.after(50, self.tts_text.focus_set)
 
-    def _handle_text_paste(self, _event=None) -> None:
-        # 不 return "break"，讓原生貼上先執行，10ms 後再更新預覽
-        self.root.after(10, self.refresh_tts_preview)
+    def _bind_text_shortcuts(self, widget: tk.Text) -> None:
+        # Use add="+" so native paste (class binding) runs first, then we update the preview.
+        widget.bind("<<Paste>>", lambda _e: self.root.after(10, self.refresh_tts_preview), add="+")
 
     def _handle_global_paste(self, _event=None) -> str | None:
-        target = self.root.focus_get()
-        if isinstance(target, tk.Text):
-            # 焦點已在文字框，原生 <<Paste>> 會自己處理，不需要干預
-            return None
-        # 焦點不在文字框時（例如點了其他地方），才手動貼入 tts_text
         self.paste_tts_text()
         return "break"
 

@@ -651,21 +651,12 @@ class WhisperApp:
         self.root.after(0, update)
 
     def _bind_text_shortcuts(self, widget: tk.Text) -> None:
-        # 只監聽 <<Paste>> 虛擬事件，不攔截鍵盤快捷鍵。
-        # tkinter 原生機制能正確讀取系統剪貼簿（含外部 app 複製的文字），
-        # 貼上完成後再補上預覽更新即可。
-        widget.bind("<<Paste>>", self._handle_text_paste)
-
-    def _handle_text_paste(self, _event=None) -> None:
-        # 不 return "break"，讓原生貼上先執行，10ms 後再更新預覽
-        self.root.after(10, self.refresh_tts_preview)
+        widget.bind("<<Paste>>", self._handle_global_paste)
+        for seq in ("<Command-v>", "<Command-V>", "<Meta-v>", "<Meta-V>",
+                    "<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            widget.bind(seq, self._handle_global_paste)
 
     def _handle_global_paste(self, _event=None) -> str | None:
-        target = self.root.focus_get()
-        if isinstance(target, tk.Text):
-            # 焦點已在文字框，原生 <<Paste>> 會自己處理，不需要干預
-            return None
-        # 焦點不在文字框時（例如點了其他地方），才手動貼入 tts_text
         self.paste_tts_text()
         return "break"
 
