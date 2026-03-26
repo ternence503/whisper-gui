@@ -65,7 +65,7 @@ TTS_VOICE_OPTIONS: Dict[str, str] = {
     "普通話男聲・可愛": "zh-CN-YunxiaNeural",  # Cute（偏童趣少年聲）
 }
 TTS_RATE_OPTIONS = ["-10%", "0%", "+5%", "+10%", "+20%", "+30%", "+40%", "+50%", "+60%", "+75%", "+100%"]
-TTS_PITCH_OPTIONS = ["-2Hz", "0Hz", "+2Hz", "+4Hz", "+6Hz", "+8Hz", "+10Hz"]
+TTS_PITCH_OPTIONS = ["-6Hz", "-4Hz", "-2Hz", "0Hz", "+2Hz", "+4Hz", "+6Hz", "+8Hz", "+10Hz"]
 TTS_MAX_CHARS = 900
 TTS_SCRIPT_MODE_TARGETS: Dict[str, Optional[int]] = {
     "原文直出": None,
