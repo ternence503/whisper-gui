@@ -7,8 +7,13 @@ set EXIT_CODE=%ERRORLEVEL%
 
 if NOT "%EXIT_CODE%"=="0" (
   echo.
-  echo 啟動失敗，請先執行 01-install-and-run.bat 安裝環境。
+  echo 啟動失敗，請把上方訊息截圖後回傳。
+  echo 若尚未安裝，請先執行 01-install-and-run.bat。
   pause
+  exit /b %EXIT_CODE%
 )
 
-exit /b %EXIT_CODE%
+echo.
+echo 程式已結束。按任意鍵關閉視窗。
+pause
+exit /b 0
