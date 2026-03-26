@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-chmod +x ./setup_and_run_mac.sh
-./setup_and_run_mac.sh --only-launch
+chmod +x ./_internal/setup_and_run_mac.sh
+./_internal/setup_and_run_mac.sh --only-launch
 EXIT_CODE=$?
 if [[ "$EXIT_CODE" -ne 0 ]]; then
   echo ""

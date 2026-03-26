@@ -2,7 +2,7 @@
 setlocal
 
 set SCRIPT_DIR=%~dp0
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%setup_and_run.ps1" -OnlyLaunch
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%_internal\setup_and_run.ps1" -OnlyLaunch
 set EXIT_CODE=%ERRORLEVEL%
 
 if NOT "%EXIT_CODE%"=="0" (

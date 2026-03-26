@@ -155,15 +155,44 @@ launch_gui() {
 }
 
 if [[ "$ONLY_LAUNCH" -eq 0 ]]; then
-  ensure_runtime_dependencies
-  BASE_PYTHON="$(resolve_base_python)"
-  if [[ -z "${BASE_PYTHON:-}" || ! -x "$BASE_PYTHON" ]]; then
-    echo "錯誤：找不到可用的 python3。"
-    exit 1
+  MODEL_FILE="$MODELS_DIR/$MODEL.pt"
+  ALREADY_INSTALLED=0
+  if [[ -f "$DEPS_STAMP" && -f "$MODEL_FILE" ]] && command -v ffmpeg >/dev/null 2>&1; then
+    ALREADY_INSTALLED=1
   fi
-  ensure_python_version "$BASE_PYTHON"
-  ensure_venv_and_packages "$BASE_PYTHON"
-  ensure_model
+
+  if [[ "$ALREADY_INSTALLED" -eq 1 ]]; then
+    echo ""
+    echo "環境已就緒，正在啟動程式..."
+    echo ""
+  else
+    echo ""
+    echo "首次安裝，請稍候..."
+    echo "（需安裝 Homebrew、Python、ffmpeg 與 Whisper 模型，約需幾分鐘，請保持網路連線）"
+    echo ""
+
+    echo "[步驟 1/3] 安裝 Homebrew、Python 3.12、ffmpeg..."
+    ensure_runtime_dependencies
+    BASE_PYTHON="$(resolve_base_python)"
+    if [[ -z "${BASE_PYTHON:-}" || ! -x "$BASE_PYTHON" ]]; then
+      echo "錯誤：找不到可用的 python3。"
+      exit 1
+    fi
+    ensure_python_version "$BASE_PYTHON"
+
+    echo "[步驟 2/3] 安裝 Python 套件（含 openai-whisper，請耐心等候）..."
+    ensure_venv_and_packages "$BASE_PYTHON"
+
+    echo "[步驟 3/3] 下載 Whisper 語音模型（$MODEL）..."
+    ensure_model
+
+    echo ""
+    echo "====================================="
+    echo "  安裝完成！程式即將自動開啟。"
+    echo "  下次只需雙擊「02-直接啟動.command」即可。"
+    echo "====================================="
+    echo ""
+  fi
 fi
 
 launch_gui
