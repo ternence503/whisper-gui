@@ -11,7 +11,7 @@
 ## 使用步驟（給新手）
 
 1. 把整個 `Whisper_Mac_一鍵安裝版` 資料夾複製到自己的 Mac（例如桌面）。
-2. 雙擊 `01-一鍵安裝並啟動.command`。
+2. 雙擊 `▶ 啟動 Whisper.command`。
 3. 第一次會自動完成：
    - 安裝 Homebrew（若尚未安裝）
    - 安裝 Python 與 ffmpeg
@@ -19,18 +19,15 @@
    - 安裝 Whisper 套件
    - 下載 Whisper 模型（預設 `small`）
 4. 完成後會自動開啟圖形介面。
-5. 之後只要雙擊 `02-直接啟動.command` 即可。
-6. 可直接選擇音檔或影片（例如 mp3/wav/mp4/mov/mkv），程式會自動轉成文字。
-7. 也可切到「文字轉語音」分頁，貼上文字輸出 MP3。
-8. 中文內容會自動轉為繁體；外語內容維持原文輸出。
+5. 之後一樣雙擊 `▶ 啟動 Whisper.command` 即可（已安裝會直接開啟）。
+6. 提示：把 `▶ 啟動 Whisper.command` 拖到 Dock，以後就像一般 App 一鍵啟動。
+7. 可直接選擇音檔或影片（例如 mp3/wav/mp4/mov/mkv），程式會自動轉成文字。
+8. 也可切到「文字轉語音」分頁，貼上文字輸出 MP3。
+9. 中文內容會自動轉為繁體；外語內容維持原文輸出。
 
 ## 更新（既有使用者）
 
-只需覆蓋 GUI 程式檔，不需重新安裝環境：
-
-1. 下載新版 `whisper_gui_mac.py`
-2. 覆蓋原本資料夾內的同名檔案
-3. 雙擊 `02-直接啟動.command` 即可
+重新下載最新版 zip，雙擊 `▶ 啟動 Whisper.command`，程式會自動偵測新版本並更新，無需手動操作。
 
 ## 發佈前清理（建議）
 
@@ -83,11 +80,11 @@
 若第一次想改模型，可在終端機進入此資料夾後執行：
 
 ```bash
-./setup_and_run_mac.sh medium
+./_internal/setup_and_run_mac.sh medium
 ```
 
 或：
 
 ```bash
-./setup_and_run_mac.sh turbo
+./_internal/setup_and_run_mac.sh turbo
 ```

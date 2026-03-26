@@ -69,8 +69,8 @@ cd Whisper_開發版_整理版
 - **中文繁化**：偵測語言為中文時，使用 OpenCC config `s2twp` 轉為繁體中文（`_to_traditional`）
 - **文字轉語音**：使用 `edge-tts` 產生 `.mp3`，長文會先分段再透過 `ffmpeg` 合併
   - 使用 `asyncio.new_event_loop()` + task cancellation 實現即時停止
-  - GUI 提供語速選項：`-10%`、`0%`、`+5%`、`+10%`、`+20%`、`+30%`、`+40%`、`+50%`（預設 `+5%`）
-  - GUI 提供音高選項：`-2Hz`、`0Hz`、`+2Hz`、`+4Hz`（預設 `+2Hz`）
+  - GUI 提供語速選項：`-10%`、`0%`、`+5%`、`+10%`、`+20%`、`+30%`、`+40%`、`+50%`、`+60%`、`+75%`、`+100%`（預設 `+5%`）
+  - GUI 提供音高選項：`-6Hz`、`-4Hz`、`-2Hz`、`0Hz`、`+2Hz`、`+4Hz`、`+6Hz`、`+8Hz`、`+10Hz`（預設 `+2Hz`）
   - 12 種聲音，分台灣腔 / 粵語腔 / 普通話三組（見下方聲音清單）
   - 已有保守型「朗讀優化」：只調整斷句、時間、電話、網址的朗讀形式，不改活動資訊本身
   - 輸出模式：`原文直出`、`2 分鐘精簡版`、`短影音版`
@@ -107,8 +107,8 @@ cd Whisper_開發版_整理版
 | 版本 | 說明 |
 |------|------|
 | 開發版 | 使用 `setup_dev_env.sh` 建立 `.venv`，ffmpeg 由 Homebrew 安裝 |
-| Mac 版 | `setup_and_run_mac.sh` 包含完整 Homebrew + Python + ffmpeg 安裝流程，含 `download_model.py` |
-| Windows 版 | 內建 `ffmpeg/` 目錄，使用 PowerShell (`setup_and_run.ps1`) + `.bat` 啟動 |
+| Mac 版 | `setup_and_run_mac.sh` 包含完整 Homebrew + Python + ffmpeg 安裝流程，含 `download_model.py`；單一啟動點 `▶ 啟動 Whisper.command` |
+| Windows 版 | 使用 PowerShell (`setup_and_run.ps1`) + `▶ 啟動 Whisper.bat`；環境存於 `%LOCALAPPDATA%\WhisperGui\`；自動建立桌面捷徑 |
 
 ## 目前待辦
 

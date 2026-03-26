@@ -10,26 +10,22 @@
 
 ## 使用者怎麼操作
 
-1. 把整個 `Whisper_Windows_一鍵安裝版` 資料夾複製到 Windows（例如桌面 `WhisperWin`）。
-2. 雙擊 `01-install-and-run.bat`。
+1. 把整個 `Whisper_Windows_一鍵安裝版` 資料夾複製到 Windows（例如桌面）。
+2. 雙擊 `▶ 啟動 Whisper.bat`。
 3. 第一次會自動完成：
    - Python 環境建立
    - 套件安裝
    - FFmpeg 下載
    - Whisper 模型下載（預設 `small`）
-4. 安裝完會自動開啟 GUI。
-5. 之後直接雙擊 `02-start-app.bat` 即可啟動。
+4. 安裝完會自動開啟 GUI，並在桌面建立 `Whisper` 捷徑。
+5. 之後直接雙擊桌面的 `Whisper` 捷徑，或再次雙擊 `▶ 啟動 Whisper.bat` 即可（已安裝會直接開啟）。
 6. 可直接選擇音檔或影片（例如 mp3/wav/mp4/mov/mkv），程式會自動轉成文字。
 7. 也可切到「文字轉語音」分頁，貼上文字輸出 MP3。
 8. 中文內容會自動轉為繁體；外語內容維持原文輸出。
 
 ## 更新（既有使用者）
 
-只需覆蓋 GUI 程式檔，不需重新安裝環境：
-
-1. 下載新版 `whisper_gui_win.py`
-2. 覆蓋原本資料夾內的同名檔案
-3. 雙擊 `02-start-app.bat` 即可
+重新下載最新版 zip，雙擊 `▶ 啟動 Whisper.bat`，程式會自動偵測新版本並更新，無需手動操作。
 
 ## 發佈前清理（建議）
 
@@ -38,7 +34,7 @@
 - `99-打包前清理.bat`
 
 用途：
-- 清掉 `.venv`、模型、ffmpeg 與快取暫存
+- 清掉快取暫存
 - 降低檔案體積
 - 避免把你本機狀態一起打包出去
 
@@ -52,8 +48,8 @@
 - 這個 `Whisper_Windows_一鍵安裝版` 資料夾內的檔案請保持完整，不要拆開。
 - 不要改名 `setup_and_run.ps1`、`whisper_gui_win.py`。
 - 若第一次想改模型，可在命令列執行：
-  - `01-install-and-run.bat medium`
-  - `01-install-and-run.bat turbo`
+  - `▶ 啟動 Whisper.bat medium`
+  - `▶ 啟動 Whisper.bat turbo`
 
 ## 轉錄輸出
 
