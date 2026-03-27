@@ -170,10 +170,16 @@ function Ensure-VenvAndPackages {
             throw "Failed to upgrade pip in local environment."
         }
 
+        # Pre-install llvmlite and numba from binary wheels to avoid source build issues
+        & $VenvPython -m pip install --only-binary :all: llvmlite numba 2>$null
+
         & $VenvPython -m pip install -r $RequirementsFile
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to install Python dependencies."
         }
+
+        # torch 2.x requires numpy<2; pin after full install to override numba's numpy upgrade
+        & $VenvPython -m pip install "numpy<2" --quiet
 
         New-Item -ItemType File -Path $DepsStamp -Force | Out-Null
     }
