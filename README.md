@@ -9,8 +9,8 @@
 
 | 平台 | 下載連結 |
 |------|---------|
-| **Mac** | [**下載 Mac 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Mac_一鍵安裝版_v1.2.0.zip) |
-| **Windows** | [**下載 Windows 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Windows_一鍵安裝版_v1.2.0.zip) |
+| **Mac** | [**下載 Mac 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Mac_._v1.2.0.zip) |
+| **Windows** | [**下載 Windows 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Windows_._v1.2.0.zip) |
 
 > 下載後解壓縮，雙擊「▶ 啟動 Whisper」即可。第一次會自動安裝環境（需連網），之後直接開啟。
 
