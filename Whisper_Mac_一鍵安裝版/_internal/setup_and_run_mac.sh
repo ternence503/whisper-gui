@@ -140,6 +140,8 @@ ensure_venv_and_packages() {
   if [[ "$needs_install" -eq 1 ]]; then
     log_step "安裝/更新 Python 套件..."
     "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
+    # Pre-install llvmlite and numba from binary wheels to avoid source build issues on newer macOS
+    "$VENV_PYTHON" -m pip install --only-binary :all: llvmlite numba 2>/dev/null || true
     "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
     touch "$DEPS_STAMP"
   fi
