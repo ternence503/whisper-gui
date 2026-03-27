@@ -143,6 +143,8 @@ ensure_venv_and_packages() {
     # Pre-install llvmlite and numba from binary wheels to avoid source build issues on newer macOS
     "$VENV_PYTHON" -m pip install --only-binary :all: llvmlite numba 2>/dev/null || true
     "$VENV_PYTHON" -m pip install -r "$REQUIREMENTS_FILE"
+    # torch 2.x requires numpy<2; pin after full install to override numba's numpy upgrade
+    "$VENV_PYTHON" -m pip install "numpy<2" --quiet
     touch "$DEPS_STAMP"
   fi
 }
