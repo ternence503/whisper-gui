@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案說明
 
-這是 Ternence 開發的 Whisper 語音工具（v1.2.0），提供圖形化介面，支援 Mac 與 Windows。
+這是 Ternence 開發的 Whisper 語音工具（v1.2.1），提供圖形化介面，支援 Mac 與 Windows。
 
 ## 每次開啟先閱讀
 
@@ -95,9 +95,12 @@ cd Whisper_開發版_整理版
 
 ## 發佈流程（版本更新）
 
+> ⚠️ **2026-03-26 重構後，Mac/Windows 實際執行的程式都在 `_internal/` 底下**（`▶ 啟動 Whisper.command` / `.bat` 會 cd 進 `_internal` 才跑 `whisper_gui_mac.py`/`whisper_gui_win.py`）。
+> 複製到舊的頂層路徑（沒有 `_internal/`）只會產生一份不會被執行的死檔案——2026-06-29 修 bug 時就因為這份過時說明，先誤改了 `Whisper_Mac_一鍵安裝版/whisper_gui_mac.py`（頂層、未被 git 追蹤的殘留檔），後來才發現真正會跑的是 `Whisper_Mac_一鍵安裝版/_internal/whisper_gui_mac.py`。修改前務必先用 `grep -n whisper_gui *.sh` 之類的方式確認該版本真正引用的路徑。
+
 1. 在 `Whisper_開發版_整理版/whisper_gui.py` 完成修改
-2. 同步到 Mac 版：`cp whisper_gui.py ../Whisper_Mac_一鍵安裝版/whisper_gui_mac.py`
-3. 同步到 Win 版：`cp whisper_gui.py ../Whisper_Windows_一鍵安裝版/whisper_gui_win.py`，然後將 `_configure_runtime_environment` 替換為 Windows 版本
+2. 同步到 Mac 版：`cp whisper_gui.py ../Whisper_Mac_一鍵安裝版/_internal/whisper_gui_mac.py`
+3. 同步到 Win 版：`cp whisper_gui.py ../Whisper_Windows_一鍵安裝版/_internal/whisper_gui_win.py`，然後將 `_configure_runtime_environment` 替換為 Windows 版本
 4. 更新 `APP_VERSION` 字串（三個檔案）
 5. 更新各 README 與本 CLAUDE.md 的版本資訊
 6. 執行清理腳本後打包發佈

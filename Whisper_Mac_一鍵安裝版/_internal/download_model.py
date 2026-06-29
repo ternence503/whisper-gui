@@ -8,6 +8,14 @@ import pathlib
 import urllib.request
 
 try:
+    # 解決公司網路 SSL 檢查自簽憑證造成下載失敗的問題（行為等同瀏覽器）
+    import truststore
+
+    truststore.inject_into_ssl()
+except Exception:  # pragma: no cover
+    pass
+
+try:
     from whisper import _MODELS  # type: ignore
 except Exception as exc:  # pragma: no cover
     raise SystemExit("尚未安裝 openai-whisper，請先執行一鍵安裝腳本。") from exc

@@ -162,6 +162,12 @@ function Ensure-VenvAndPackages {
             $needsInstall = $true
         }
     }
+    if (-not $needsInstall) {
+        & $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('truststore') else 1)" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $needsInstall = $true
+        }
+    }
 
     if ($needsInstall) {
         Write-Step "Installing/updating Python dependencies..."

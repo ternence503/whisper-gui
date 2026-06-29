@@ -136,6 +136,11 @@ ensure_venv_and_packages() {
       needs_install=1
     fi
   fi
+  if [[ "$needs_install" -eq 0 ]]; then
+    if ! "$VENV_PYTHON" -c "import truststore" >/dev/null 2>&1; then
+      needs_install=1
+    fi
+  fi
 
   if [[ "$needs_install" -eq 1 ]]; then
     log_step "安裝/更新 Python 套件..."

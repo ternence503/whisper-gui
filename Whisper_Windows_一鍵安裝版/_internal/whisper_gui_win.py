@@ -21,6 +21,16 @@ try:
 except ModuleNotFoundError as exc:
     raise SystemExit("目前的 Python 未啟用 tkinter，請安裝 tcl-tk 後再執行本工具。") from exc
 
+try:
+    # 改用作業系統內建的信任憑證庫驗證 SSL，解決公司網路（防火牆/防毒做 SSL 檢查）
+    # 自簽憑證造成下載 Whisper 模型時 CERTIFICATE_VERIFY_FAILED 的問題。
+    # 行為等同瀏覽器：作業系統已信任的憑證，Python 也會信任。
+    import truststore
+
+    truststore.inject_into_ssl()
+except Exception:  # pragma: no cover
+    pass
+
 import whisper
 try:
     from opencc import OpenCC
@@ -45,7 +55,7 @@ MEDIA_FILE_PATTERNS = (
 )
 
 APP_AUTHOR = "Ternence"
-APP_VERSION = "v1.2.0"
+APP_VERSION = "v1.2.1"
 APP_SIGNATURE = f"{APP_AUTHOR} {APP_VERSION}"
 TTS_VOICE_OPTIONS: Dict[str, str] = {
     # 台灣腔
@@ -150,6 +160,53 @@ def _format_vtt(segments: Iterable[Dict[str, float]]) -> str:
         lines.append(text)
         lines.append("")
     return "\n".join(lines).strip() + "\n"
+
+
+_REPEAT_STRIP_PATTERN = re.compile(r"[\s,，。！？!?.、]")
+
+
+def _dedupe_repeated_segments(
+    segments: Iterable[Dict[str, object]], max_repeats: int = 2
+) -> List[Dict[str, object]]:
+    """過濾靜音/配樂段落常見的 Whisper 幻覺：同一句話連續重複數十次。
+
+    保留每段重複文字的前 max_repeats 次出現，超過的直接捨棄，
+    這樣正常的歌詞疊句或口語重複（通常 1~2 次）不會被誤殺。
+    """
+    deduped: List[Dict[str, object]] = []
+    run_key: Optional[str] = None
+    run_count = 0
+    for seg in segments:
+        text = str(seg.get("text", "") or "").strip()
+        key = _REPEAT_STRIP_PATTERN.sub("", text)
+        if key and key == run_key:
+            run_count += 1
+        else:
+            run_key = key
+            run_count = 1
+        if not key or run_count <= max_repeats:
+            deduped.append(seg)
+    return deduped
+
+
+def _slice_long_sentence(sentence: str, max_chars: int) -> List[str]:
+    """硬切過長字句時優先在空白處斷開，避免切在詞中間造成 TTS 唸出怪音。
+
+    沒有標點的長文字（例如 Whisper 中文輸出）常常整段都超過 max_chars，
+    若找不到空白可斷（例如真的整段無空格），才退回原本的硬切字元數。
+    """
+    pieces: List[str] = []
+    remaining = sentence
+    while len(remaining) > max_chars:
+        window = remaining[:max_chars]
+        split_at = window.rfind(" ")
+        if split_at <= 0:
+            split_at = max_chars
+        pieces.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+    if remaining:
+        pieces.append(remaining)
+    return pieces
 
 
 def _configure_runtime_environment() -> None:
@@ -1059,7 +1116,7 @@ class WhisperApp:
             sentences = [s.strip() for s in re.split(r"(?<=[。！？!?])", paragraph) if s.strip()]
             for sentence in sentences or [paragraph]:
                 if len(sentence) > max_chars:
-                    pieces = [sentence[i : i + max_chars] for i in range(0, len(sentence), max_chars)]
+                    pieces = _slice_long_sentence(sentence, max_chars)
                 else:
                     pieces = [sentence]
                 for piece in pieces:
@@ -1252,17 +1309,13 @@ class WhisperApp:
             if self.stop_event.is_set():
                 raise SystemExit
 
-            text = result.get("text", "").strip()
-            if self.stop_event.is_set():
-                raise SystemExit
-
-            output_paths = self._write_outputs(audio_path, result)
+            output_paths, preview_text = self._write_outputs(audio_path, result)
             detected_lang = result.get("language") or "unknown"
             self._update_status(
                 f"完成！偵測語言：{detected_lang}. 檔案已產生。"
             )
             self._update_outputs_label(output_paths)
-            self._update_preview(text)
+            self._update_preview(preview_text)
         except SystemExit:
             self._update_status("轉錄已停止。")
             self._update_outputs_label({})
@@ -1276,17 +1329,22 @@ class WhisperApp:
 
     def _write_outputs(
         self, audio_path: str, result: Dict[str, object]
-    ) -> Dict[str, str]:
+    ) -> "tuple[Dict[str, str], str]":
         base_dir = os.path.dirname(audio_path)
         audio_name = os.path.splitext(os.path.basename(audio_path))[0]
         detected_lang = str(result.get("language", "") or "").lower() or "auto"
         suffix = detected_lang
 
+        segments = _dedupe_repeated_segments(result.get("segments", []) or [])
+
+        text_lines = [str(seg.get("text", "") or "").strip() for seg in segments]
+        text_lines = [line for line in text_lines if line]
+        text_content = "\n".join(text_lines) if text_lines else result.get("text", "").strip()
+
         text_path = os.path.join(base_dir, f"{audio_name}_{suffix}.txt")
         with open(text_path, "w", encoding="utf-8") as txt_file:
-            txt_file.write(result.get("text", "").strip() + "\n")
+            txt_file.write(text_content + "\n")
 
-        segments = result.get("segments", []) or []
         srt_content = _format_srt(segments)
         srt_path = os.path.join(base_dir, f"{audio_name}_{suffix}.srt")
         with open(srt_path, "w", encoding="utf-8") as srt_file:
@@ -1297,7 +1355,7 @@ class WhisperApp:
         with open(vtt_path, "w", encoding="utf-8") as vtt_file:
             vtt_file.write(vtt_content)
 
-        return {"txt": text_path, "srt": srt_path, "vtt": vtt_path}
+        return {"txt": text_path, "srt": srt_path, "vtt": vtt_path}, text_content
 
     def _handle_error(self, exc: Exception) -> None:
         self._update_status("發生錯誤，請稍後再試")
