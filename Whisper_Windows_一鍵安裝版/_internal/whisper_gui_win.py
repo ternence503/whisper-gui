@@ -21,16 +21,6 @@ try:
 except ModuleNotFoundError as exc:
     raise SystemExit("目前的 Python 未啟用 tkinter，請安裝 tcl-tk 後再執行本工具。") from exc
 
-try:
-    # 改用作業系統內建的信任憑證庫驗證 SSL，解決公司網路（防火牆/防毒做 SSL 檢查）
-    # 自簽憑證造成下載 Whisper 模型時 CERTIFICATE_VERIFY_FAILED 的問題。
-    # 行為等同瀏覽器：作業系統已信任的憑證，Python 也會信任。
-    import truststore
-
-    truststore.inject_into_ssl()
-except Exception:  # pragma: no cover
-    pass
-
 import whisper
 try:
     from opencc import OpenCC
@@ -55,7 +45,7 @@ MEDIA_FILE_PATTERNS = (
 )
 
 APP_AUTHOR = "Ternence"
-APP_VERSION = "v1.2.1"
+APP_VERSION = "v1.3.0"
 APP_SIGNATURE = f"{APP_AUTHOR} {APP_VERSION}"
 TTS_VOICE_OPTIONS: Dict[str, str] = {
     # 台灣腔
@@ -162,6 +152,19 @@ def _format_vtt(segments: Iterable[Dict[str, float]]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _format_lrc(segments: Iterable[Dict[str, float]]) -> str:
+    lines: List[str] = []
+    for seg in segments:
+        text = seg.get("text", "").strip()
+        if not text:
+            continue
+        start = seg.get("start", 0.0)
+        minutes = int(start // 60)
+        seconds = start % 60
+        lines.append(f"[{minutes:02d}:{seconds:05.2f}]{text}")
+    return "\n".join(lines) + "\n"
+
+
 _REPEAT_STRIP_PATTERN = re.compile(r"[\s,，。！？!?.、]")
 
 
@@ -253,6 +256,7 @@ class WhisperApp:
         self.status_var = tk.StringVar(value="選擇音檔或影片後點擊開始")
         self.output_paths_var = tk.StringVar(value="")
         self.word_timestamps_var = tk.BooleanVar(value=False)
+        self.language_var = tk.StringVar(value="自動偵測")
         self.converter_cache: Dict[str, object] = {}
         self.opencc_unavailable_notified = False
         self.edge_tts_unavailable_notified = False
@@ -266,6 +270,15 @@ class WhisperApp:
         self.tts_script_mode_var = tk.StringVar(value="原文直出")
         self.tts_preview_mode_var = tk.StringVar(value="目前輸出預覽")
 
+        self.lyrics_audio_path_var = tk.StringVar()
+        self.lyrics_model_var = tk.StringVar(value=MODEL_OPTIONS[2])  # medium 預設
+        self.lyrics_language_var = tk.StringVar(value="自動偵測")
+        self.lyrics_use_demucs_var = tk.BooleanVar(value=True)
+        self.lyrics_status_var = tk.StringVar(value="選擇音樂檔後點擊開始")
+        self.lyrics_output_paths_var = tk.StringVar(value="")
+        self.lyrics_stop_event = threading.Event()
+        self.lyrics_worker_thread: Optional[threading.Thread] = None
+
         self._build_ui()
 
     def _notify_runtime_warning(self, message: str, *, flag: str) -> None:
@@ -278,31 +291,37 @@ class WhisperApp:
     def _build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        self.root.bind_all("<Command-v>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Command-V>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Control-v>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Control-V>", self._handle_global_paste, add="+")
-        self.root.bind_all("<Shift-Insert>", self._handle_global_paste, add="+")
+        self.root.bind_all("<<Paste>>", self._handle_global_paste, add="+")
+        for _seq in ("<Command-v>", "<Command-V>", "<Meta-v>", "<Meta-V>",
+                     "<Control-v>", "<Control-V>", "<Shift-Insert>"):
+            self.root.bind_all(_seq, self._handle_global_paste, add="+")
 
         container = ttk.Frame(self.root, padding=16)
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(container)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook = ttk.Notebook(container)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        transcribe_frame = ttk.Frame(notebook, padding=20)
+        transcribe_frame = ttk.Frame(self.notebook, padding=20)
         transcribe_frame.columnconfigure(1, weight=1)
         transcribe_frame.rowconfigure(7, weight=1)
-        notebook.add(transcribe_frame, text="語音轉字幕")
+        self.notebook.add(transcribe_frame, text="語音轉字幕")
         self._build_transcribe_tab(transcribe_frame)
 
-        tts_outer = ttk.Frame(notebook)
+        tts_outer = ttk.Frame(self.notebook)
         tts_outer.columnconfigure(0, weight=1)
         tts_outer.rowconfigure(0, weight=1)
-        notebook.add(tts_outer, text="文字轉語音")
+        self.notebook.add(tts_outer, text="文字轉語音")
         self._build_tts_scrollable_tab(tts_outer)
+
+        lyrics_frame = ttk.Frame(self.notebook, padding=20)
+        lyrics_frame.columnconfigure(1, weight=1)
+        lyrics_frame.rowconfigure(7, weight=1)
+        self.notebook.add(lyrics_frame, text="歌詞辨識")
+        self._build_lyrics_tab(lyrics_frame)
 
     def _build_tts_scrollable_tab(self, parent: ttk.Frame) -> None:
         canvas = tk.Canvas(parent, highlightthickness=0)
@@ -340,6 +359,9 @@ class WhisperApp:
         tts_frame.bind("<MouseWheel>", on_mousewheel)
         tts_frame.bind("<Button-4>", on_mousewheel)
         tts_frame.bind("<Button-5>", on_mousewheel)
+
+        canvas.bind("<FocusIn>", lambda _e: self.tts_text.focus_set() if hasattr(self, "tts_text") else None)
+        canvas.bind("<Button-1>", lambda _e: self.tts_text.focus_set() if hasattr(self, "tts_text") else None)
 
         tts_frame.columnconfigure(1, weight=1)
         tts_frame.rowconfigure(5, weight=1)
@@ -383,17 +405,30 @@ class WhisperApp:
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
 
+        lang_row = ttk.Frame(options_frame)
+        lang_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        ttk.Label(lang_row, text="語言：").pack(side="left")
+        lang_box = ttk.Combobox(
+            lang_row,
+            textvariable=self.language_var,
+            values=["自動偵測", "繁體中文 (zh)", "英文 (en)", "日文 (ja)", "韓文 (ko)"],
+            state="readonly",
+            width=14,
+        )
+        lang_box.pack(side="left")
+        ttk.Label(lang_row, text="  （若輸出亂碼或重複文字，請指定語言）", foreground="#666").pack(side="left")
+
         ttk.Checkbutton(
             options_frame,
             text="輸出字級時間戳 (word timestamps)",
             variable=self.word_timestamps_var,
-        ).grid(row=1, column=0, columnspan=2, sticky="w")
+        ).grid(row=2, column=0, columnspan=2, sticky="w")
 
         ttk.Label(
             options_frame,
             text="中文內容會自動轉繁體；外語內容維持原文。",
             foreground="#444",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         button_row = ttk.Frame(frame)
         button_row.grid(row=3, column=0, columnspan=3, pady=(16, 16), sticky="ew")
@@ -431,6 +466,250 @@ class WhisperApp:
         ttk.Button(frame, text="清除", command=self.clear_preview).grid(
             row=8, column=2, sticky="e", pady=(8, 0)
         )
+
+    def _build_lyrics_tab(self, frame: ttk.Frame) -> None:
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="音樂檔：").grid(row=0, column=0, sticky="w")
+        ttk.Entry(frame, textvariable=self.lyrics_audio_path_var).grid(
+            row=0, column=1, sticky="ew", padx=(0, 8)
+        )
+        ttk.Button(frame, text="瀏覽", command=self.browse_lyrics_file).grid(
+            row=0, column=2, sticky="e"
+        )
+
+        ttk.Label(frame, text="Whisper 模型：").grid(
+            row=1, column=0, sticky="w", pady=(12, 0)
+        )
+        ttk.Combobox(
+            frame,
+            textvariable=self.lyrics_model_var,
+            values=MODEL_OPTIONS,
+            state="readonly",
+        ).grid(row=1, column=1, sticky="w", pady=(12, 0))
+
+        options_frame = ttk.Labelframe(frame, text="選項", padding=12)
+        options_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        options_frame.columnconfigure(1, weight=1)
+
+        lang_row = ttk.Frame(options_frame)
+        lang_row.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(lang_row, text="語言：").pack(side="left")
+        ttk.Combobox(
+            lang_row,
+            textvariable=self.lyrics_language_var,
+            values=["自動偵測", "繁體中文 (zh)", "英文 (en)", "日文 (ja)", "韓文 (ko)"],
+            state="readonly",
+            width=14,
+        ).pack(side="left")
+
+        ttk.Checkbutton(
+            options_frame,
+            text="先用 Demucs 分離人聲（去除背景音樂，提升辨識準確率；首次使用會下載模型約 80MB）",
+            variable=self.lyrics_use_demucs_var,
+        ).grid(row=1, column=0, columnspan=2, sticky="w")
+
+        ttk.Label(
+            options_frame,
+            text="輸出：.txt 純歌詞、.lrc 帶時間戳歌詞、.srt 字幕",
+            foreground="#444",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        button_row = ttk.Frame(frame)
+        button_row.grid(row=3, column=0, columnspan=3, pady=(16, 16), sticky="ew")
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+        self.lyrics_start_button = ttk.Button(
+            button_row, text="開始辨識", command=self.start_lyrics
+        )
+        self.lyrics_start_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.lyrics_stop_button = ttk.Button(
+            button_row, text="停止", command=self.stop_lyrics, state=tk.DISABLED
+        )
+        self.lyrics_stop_button.grid(row=0, column=1, sticky="ew")
+
+        ttk.Label(frame, textvariable=self.lyrics_status_var, foreground="#1c5f2c").grid(
+            row=4, column=0, columnspan=3, sticky="w"
+        )
+        ttk.Label(frame, textvariable=self.lyrics_output_paths_var, wraplength=640).grid(
+            row=5, column=0, columnspan=3, sticky="w", pady=(8, 12)
+        )
+        ttk.Label(frame, text="歌詞預覽：").grid(row=6, column=0, columnspan=3, sticky="w")
+
+        self.lyrics_preview = tk.Text(frame, wrap="word", height=12)
+        self.lyrics_preview.grid(row=7, column=0, columnspan=3, sticky="nsew")
+        self.lyrics_preview.config(state=tk.DISABLED)
+
+        ttk.Label(frame, text=f"by {APP_SIGNATURE}", foreground="#666").grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+        ttk.Button(frame, text="清除", command=self.clear_lyrics_preview).grid(
+            row=8, column=2, sticky="e", pady=(8, 0)
+        )
+
+    def browse_lyrics_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="選擇音樂檔",
+            filetypes=[("音訊/影片", MEDIA_FILE_PATTERNS), ("所有檔案", "*.*")],
+        )
+        if path:
+            self.lyrics_audio_path_var.set(path)
+
+    def start_lyrics(self) -> None:
+        audio_path = self.lyrics_audio_path_var.get().strip()
+        if not audio_path:
+            messagebox.showwarning("提醒", "請先選擇音樂檔")
+            return
+        if not os.path.isfile(audio_path):
+            messagebox.showerror("錯誤", "找不到指定的檔案，請重新選擇")
+            return
+        if self.lyrics_worker_thread and self.lyrics_worker_thread.is_alive():
+            messagebox.showinfo("提醒", "目前已有辨識正在進行")
+            return
+
+        self.lyrics_stop_event.clear()
+        self._update_lyrics_control_states(True)
+        worker = threading.Thread(
+            target=self._lyrics_worker,
+            args=(audio_path, self.lyrics_model_var.get(), self.lyrics_use_demucs_var.get()),
+            daemon=True,
+        )
+        self.lyrics_worker_thread = worker
+        worker.start()
+
+    def stop_lyrics(self) -> None:
+        if not self.lyrics_worker_thread or not self.lyrics_worker_thread.is_alive():
+            return
+        self.lyrics_stop_event.set()
+        self._update_lyrics_status("已請求停止...")
+        self.lyrics_stop_button.config(state=tk.DISABLED)
+        self._interrupt_thread(self.lyrics_worker_thread)
+
+    def _update_lyrics_status(self, message: str) -> None:
+        self.root.after(0, lambda: self.lyrics_status_var.set(message))
+
+    def _update_lyrics_control_states(self, running: bool) -> None:
+        start_state = tk.DISABLED if running else tk.NORMAL
+        stop_state = tk.NORMAL if running else tk.DISABLED
+        self.lyrics_start_button.config(state=start_state)
+        self.lyrics_stop_button.config(state=stop_state)
+
+    def _update_lyrics_preview(self, text: str) -> None:
+        def update() -> None:
+            self.lyrics_preview.config(state=tk.NORMAL)
+            self.lyrics_preview.delete("1.0", tk.END)
+            self.lyrics_preview.insert(tk.END, text.strip() or "(空白)")
+            self.lyrics_preview.config(state=tk.DISABLED)
+        self.root.after(0, update)
+
+    def clear_lyrics_preview(self) -> None:
+        self.lyrics_preview.config(state=tk.NORMAL)
+        self.lyrics_preview.delete("1.0", tk.END)
+        self.lyrics_preview.config(state=tk.DISABLED)
+        self.lyrics_output_paths_var.set("")
+        self.lyrics_status_var.set("已清除，可重新選擇音樂檔")
+
+    def _lyrics_worker(self, audio_path: str, model_name: str, use_demucs: bool) -> None:
+        tmp_dir = None
+        try:
+            vocal_path = audio_path
+
+            if use_demucs:
+                self._update_lyrics_status("正在分離人聲（首次使用需下載 Demucs 模型約 80MB）...")
+                tmp_dir = tempfile.mkdtemp(prefix="whisper_demucs_")
+                proc = subprocess.run(
+                    [
+                        sys.executable, "-m", "demucs",
+                        "--two-stems=vocals", "--mp3",
+                        "-o", tmp_dir, audio_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if proc.returncode != 0:
+                    err = proc.stderr.strip() or proc.stdout.strip()
+                    if "No module named demucs" in err:
+                        raise RuntimeError(
+                            "尚未安裝 Demucs，請重新執行 01-建立開發環境.command 後再試。"
+                        )
+                    raise RuntimeError(f"Demucs 分離失敗：{err}")
+
+                if self.lyrics_stop_event.is_set():
+                    raise SystemExit
+
+                vocals_found: List[str] = []
+                for root_dir, _dirs, files in os.walk(tmp_dir):
+                    for f in files:
+                        if f == "vocals.mp3":
+                            vocals_found.append(os.path.join(root_dir, f))
+                if not vocals_found:
+                    raise RuntimeError("找不到分離後的人聲檔案，請確認 ffmpeg 已安裝。")
+                vocal_path = vocals_found[0]
+                self._update_lyrics_status("人聲分離完成，載入模型中...")
+            else:
+                self._update_lyrics_status("載入模型中...")
+
+            if model_name not in self.model_cache:
+                self.model_cache[model_name] = whisper.load_model(model_name, device="cpu")
+            model = self.model_cache[model_name]
+
+            if self.lyrics_stop_event.is_set():
+                raise SystemExit
+
+            self._update_lyrics_status("辨識歌詞中（使用 CPU），請稍候...")
+            lang_selection = self.lyrics_language_var.get()
+            opts: Dict[str, object] = dict(DEFAULT_OPTIONS)
+            if lang_selection != "自動偵測":
+                opts["language"] = lang_selection.split("(")[-1].rstrip(")")
+
+            raw_result = model.transcribe(vocal_path, fp16=False, verbose=False, **opts)
+            result = self._normalize_chinese_output(raw_result)
+
+            if self.lyrics_stop_event.is_set():
+                raise SystemExit
+
+            output_paths = self._write_lyrics_outputs(audio_path, result)
+            detected_lang = result.get("language") or "unknown"
+            self._update_lyrics_status(f"完成！偵測語言：{detected_lang}. 檔案已產生。")
+            self.root.after(0, lambda: self.lyrics_output_paths_var.set(
+                "\n".join(f"{k.upper()}: {v}" for k, v in output_paths.items())
+            ))
+            self._update_lyrics_preview(result.get("text", "").strip())
+
+        except SystemExit:
+            self._update_lyrics_status("已停止。")
+            self.root.after(0, lambda: self.lyrics_output_paths_var.set(""))
+            self._update_lyrics_preview("")
+        except Exception as exc:  # pylint: disable=broad-except
+            self._update_lyrics_status("發生錯誤")
+            msg = str(exc)
+            self.root.after(0, lambda: messagebox.showerror("錯誤", msg))
+        finally:
+            if tmp_dir and os.path.isdir(tmp_dir):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            self.lyrics_worker_thread = None
+            self.lyrics_stop_event.clear()
+            self.root.after(0, lambda: self._update_lyrics_control_states(False))
+
+    def _write_lyrics_outputs(self, audio_path: str, result: Dict[str, object]) -> Dict[str, str]:
+        base_dir = os.path.dirname(audio_path)
+        audio_name = os.path.splitext(os.path.basename(audio_path))[0]
+        detected_lang = str(result.get("language", "") or "").lower() or "auto"
+
+        txt_path = os.path.join(base_dir, f"{audio_name}_lyrics_{detected_lang}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(result.get("text", "").strip() + "\n")
+
+        segments = result.get("segments", []) or []
+        lrc_path = os.path.join(base_dir, f"{audio_name}_lyrics_{detected_lang}.lrc")
+        with open(lrc_path, "w", encoding="utf-8") as f:
+            f.write(_format_lrc(segments))
+
+        srt_path = os.path.join(base_dir, f"{audio_name}_lyrics_{detected_lang}.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(_format_srt(segments))
+
+        return {"txt": txt_path, "lrc": lrc_path, "srt": srt_path}
 
     def _build_tts_tab(self, frame: ttk.Frame) -> None:
         ttk.Label(frame, text="聲音：").grid(row=0, column=0, sticky="w")
@@ -707,11 +986,12 @@ class WhisperApp:
 
         self.root.after(0, update)
 
+    def _on_tab_changed(self, _event=None) -> None:
+        if hasattr(self, "tts_text") and self.notebook.index("current") == 1:
+            self.root.after(50, self.tts_text.focus_set)
+
     def _bind_text_shortcuts(self, widget: tk.Text) -> None:
-        widget.bind("<<Paste>>", self._handle_global_paste)
-        for seq in ("<Command-v>", "<Command-V>", "<Meta-v>", "<Meta-V>",
-                    "<Control-v>", "<Control-V>", "<Shift-Insert>"):
-            widget.bind(seq, self._handle_global_paste)
+        widget.bind("<<Paste>>", lambda _e: self.root.after(10, self.refresh_tts_preview), add="+")
 
     def _handle_global_paste(self, _event=None) -> str | None:
         self.paste_tts_text()
@@ -750,6 +1030,11 @@ class WhisperApp:
         opts: Dict[str, object] = dict(DEFAULT_OPTIONS)
         if word_timestamps:
             opts["word_timestamps"] = True
+        lang_selection = self.language_var.get()
+        if lang_selection != "自動偵測":
+            # 取出括號內的語言代碼，例如 "中文 (zh)" → "zh"
+            lang_code = lang_selection.split("(")[-1].rstrip(")")
+            opts["language"] = lang_code
         return opts
 
     @staticmethod

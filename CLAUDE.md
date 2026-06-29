@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案說明
 
-這是 Ternence 開發的 Whisper 語音工具（v1.2.1），提供圖形化介面，支援 Mac 與 Windows。
+這是 Ternence 開發的 Whisper 語音工具（v1.3.0），提供圖形化介面，支援 Mac 與 Windows。
 
 ## 每次開啟先閱讀
 
@@ -54,19 +54,24 @@ cd Whisper_開發版_整理版
 - `openai-whisper==20250625`
 - `opencc-python-reimplemented>=0.1.7`（簡繁轉換）
 - `edge-tts>=7.2.8`（文字轉語音）
+- `demucs>=4.0.1`（歌詞辨識分頁的人聲分離）
+- `pip-system-certs>=5.0`（SSL 信任作業系統憑證庫，見下方技術決策）
 
 ## 核心架構
 
 所有版本（開發版、Mac 版、Windows 版）共用相同的單檔 GUI 程式架構：
 
 - **`whisper_gui.py`**（開發版）/ `whisper_gui_mac.py` / `whisper_gui_win.py`：單一檔案 tkinter 應用
-- **`WhisperApp` class**：包含全部 UI 建構、轉錄與 TTS 邏輯
-  - 介面以 `ttk.Notebook` 分成「語音轉字幕」與「文字轉語音」兩個分頁
-  - 轉錄與 TTS 都在背景 thread 執行，UI 不卡頓
+- **`WhisperApp` class**：包含全部 UI 建構、轉錄、歌詞辨識與 TTS 邏輯
+  - 介面以 `ttk.Notebook` 分成「語音轉字幕」「文字轉語音」「歌詞辨識」三個分頁
+  - 轉錄、TTS、歌詞辨識都在背景 thread 執行，UI 不卡頓
   - 停止轉錄使用 `ctypes.pythonapi.PyThreadState_SetAsyncExc`（強制中止 thread）
   - 已載入的模型快取在 `self.model_cache` dict，避免重複載入
 - **輸出格式**：`.txt`、`.srt`、`.vtt`，存放於與輸入檔同目錄，檔名格式為 `{原檔名}_{偵測語言}.{副檔名}`
+- **抗幻覺**：`_dedupe_repeated_segments()` 過濾靜音/配樂段落常見的 Whisper 連續重複幻覺（保留前 2 次出現，超過捨棄）；`.txt` 輸出為每個 segment 一行，不是整段無斷句字串
 - **中文繁化**：偵測語言為中文時，使用 OpenCC config `s2twp` 轉為繁體中文（`_to_traditional`）
+- **歌詞辨識**（v1.3.0 新增）：選用 Demucs 分離人聲（`python -m demucs --two-stems=vocals --mp3`，子行程）再用 Whisper 辨識，輸出 `.txt`/`.lrc`/`.srt`
+  - **務必使用 `--mp3` 輸出**（見下方技術決策，避免 torchaudio/torchcodec/ffmpeg ABI 版本地獄）
 - **文字轉語音**：使用 `edge-tts` 產生 `.mp3`，長文會先分段再透過 `ffmpeg` 合併
   - 使用 `asyncio.new_event_loop()` + task cancellation 實現即時停止
   - GUI 提供語速選項：`-10%`、`0%`、`+5%`、`+10%`、`+20%`、`+30%`、`+40%`、`+50%`、`+60%`、`+75%`、`+100%`（預設 `+5%`）
@@ -92,6 +97,12 @@ cd Whisper_開發版_整理版
 | 普通話男聲・陽光 | zh-CN-YunxiNeural |
 | 普通話男聲・穩重 | zh-CN-YunyangNeural |
 | 普通話男聲・可愛 | zh-CN-YunxiaNeural |
+
+## 重要技術決策
+
+- **SSL 信任作業系統憑證庫（`pip-system-certs`）**：公司網路的防火牆/防毒會對 HTTPS 做 SSL 檢查並用自己的自簽憑證，macOS/Windows 系統本身信任這張憑證，但 Python 預設不信任，導致下載 Whisper/Demucs 模型時出現 `CERTIFICATE_VERIFY_FAILED`。`pip-system-certs` 透過 `.pth` 在解譯器啟動時自動套用，**不需要任何程式碼配合**，而且涵蓋 `subprocess` 啟動的子行程（例如歌詞辨識叫用的 `python -m demucs`）。之前用 `truststore.inject_into_ssl()` 手動注入只能保護呼叫的那個程序本身，沒辦法保護 demucs 子行程，2026-06-29 已全面換成 `pip-system-certs`，三個版本都移除了手動 inject 的程式碼，純粹靠這個套件存在於 venv 裡生效。
+- **Demucs 輸出務必用 `--mp3`，不要用預設 `.wav`**：demucs 預設輸出 wav 會呼叫 `torchaudio.save()`，新版 torchaudio 把 wav 存檔的後端換成 `torchcodec`，而 `torchcodec` 需要對應 ABI 版本的 ffmpeg 動態函式庫（例如 libavutil.56），但 Homebrew 的 `ffmpeg` formula 一直追最新版（2026-06 已到 ffmpeg 8.x），版本對不上會出現 `Library not loaded: @rpath/libavutil.56.dylib`。改用 `--mp3` 輸出會走 demucs 自己的 `lameenc` 編碼器，完全不經過 torchaudio/torchcodec，不需要額外裝 `torchcodec`，也不受 Homebrew ffmpeg 版本影響。
+- **轉錄結尾幻覺重複**：`_dedupe_repeated_segments()` 過濾掉同一句話連續重複超過 2 次的 segment（去標點後比對），這是 Whisper 在靜音/配樂段落常見的幻覺，跟語言誤判是不同的成因，語言選擇器解決不了這種情況。
 
 ## 發佈流程（版本更新）
 

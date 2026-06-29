@@ -163,7 +163,13 @@ function Ensure-VenvAndPackages {
         }
     }
     if (-not $needsInstall) {
-        & $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('truststore') else 1)" *> $null
+        & $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pip_system_certs') else 1)" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $needsInstall = $true
+        }
+    }
+    if (-not $needsInstall) {
+        & $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('demucs') else 1)" *> $null
         if ($LASTEXITCODE -ne 0) {
             $needsInstall = $true
         }

@@ -137,7 +137,12 @@ ensure_venv_and_packages() {
     fi
   fi
   if [[ "$needs_install" -eq 0 ]]; then
-    if ! "$VENV_PYTHON" -c "import truststore" >/dev/null 2>&1; then
+    if ! "$VENV_PYTHON" -c "import pip_system_certs" >/dev/null 2>&1; then
+      needs_install=1
+    fi
+  fi
+  if [[ "$needs_install" -eq 0 ]]; then
+    if ! "$VENV_PYTHON" -c "import demucs" >/dev/null 2>&1; then
       needs_install=1
     fi
   fi

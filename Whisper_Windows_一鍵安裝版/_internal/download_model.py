@@ -8,16 +8,6 @@ import pathlib
 import urllib.request
 
 try:
-    # Use the OS trust store for SSL verification (same behavior as a browser).
-    # Fixes CERTIFICATE_VERIFY_FAILED when a corporate firewall/antivirus does
-    # SSL inspection with a self-signed root that the OS trusts but Python doesn't.
-    import truststore
-
-    truststore.inject_into_ssl()
-except Exception:  # pragma: no cover
-    pass
-
-try:
     from whisper import _MODELS  # type: ignore
 except Exception as exc:  # pragma: no cover
     raise SystemExit("openai-whisper is not installed in this Python environment.") from exc
