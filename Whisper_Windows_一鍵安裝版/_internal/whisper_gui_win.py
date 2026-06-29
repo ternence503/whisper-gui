@@ -668,13 +668,13 @@ class WhisperApp:
             if self.lyrics_stop_event.is_set():
                 raise SystemExit
 
-            output_paths = self._write_lyrics_outputs(audio_path, result)
+            output_paths, preview_text = self._write_lyrics_outputs(audio_path, result)
             detected_lang = result.get("language") or "unknown"
             self._update_lyrics_status(f"完成！偵測語言：{detected_lang}. 檔案已產生。")
             self.root.after(0, lambda: self.lyrics_output_paths_var.set(
                 "\n".join(f"{k.upper()}: {v}" for k, v in output_paths.items())
             ))
-            self._update_lyrics_preview(result.get("text", "").strip())
+            self._update_lyrics_preview(preview_text)
 
         except SystemExit:
             self._update_lyrics_status("已停止。")
@@ -691,16 +691,25 @@ class WhisperApp:
             self.lyrics_stop_event.clear()
             self.root.after(0, lambda: self._update_lyrics_control_states(False))
 
-    def _write_lyrics_outputs(self, audio_path: str, result: Dict[str, object]) -> Dict[str, str]:
+    def _write_lyrics_outputs(
+        self, audio_path: str, result: Dict[str, object]
+    ) -> "tuple[Dict[str, str], str]":
         base_dir = os.path.dirname(audio_path)
         audio_name = os.path.splitext(os.path.basename(audio_path))[0]
         detected_lang = str(result.get("language", "") or "").lower() or "auto"
 
+        # 歌詞的副歌/疊句正常就會重複 3~6 次，門檻要比語音轉字幕（預設 2 次）寬鬆，
+        # 只擋真正失控的幻覺循環（實測過的案例是連續 14 次），不要誤刪真正的副歌歌詞
+        segments = _dedupe_repeated_segments(result.get("segments", []) or [], max_repeats=8)
+
+        text_lines = [str(seg.get("text", "") or "").strip() for seg in segments]
+        text_lines = [line for line in text_lines if line]
+        text_content = "\n".join(text_lines) if text_lines else result.get("text", "").strip()
+
         txt_path = os.path.join(base_dir, f"{audio_name}_lyrics_{detected_lang}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(result.get("text", "").strip() + "\n")
+            f.write(text_content + "\n")
 
-        segments = result.get("segments", []) or []
         lrc_path = os.path.join(base_dir, f"{audio_name}_lyrics_{detected_lang}.lrc")
         with open(lrc_path, "w", encoding="utf-8") as f:
             f.write(_format_lrc(segments))
@@ -709,7 +718,7 @@ class WhisperApp:
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(_format_srt(segments))
 
-        return {"txt": txt_path, "lrc": lrc_path, "srt": srt_path}
+        return {"txt": txt_path, "lrc": lrc_path, "srt": srt_path}, text_content
 
     def _build_tts_tab(self, frame: ttk.Frame) -> None:
         ttk.Label(frame, text="聲音：").grid(row=0, column=0, sticky="w")
