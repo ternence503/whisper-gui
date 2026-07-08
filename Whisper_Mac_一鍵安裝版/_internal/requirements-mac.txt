@@ -1,4 +1,7 @@
 openai-whisper==20250625
+# faster-whisper：CTranslate2 後端，內建 Silero VAD，可從源頭去除靜音幻覺，
+# 速度更快、記憶體更省，且不依賴 torch。程式會優先使用，裝不起來時自動退回 openai-whisper。
+faster-whisper>=1.1.0
 opencc-python-reimplemented>=0.1.7
 edge-tts>=7.2.8
 demucs>=4.0.1

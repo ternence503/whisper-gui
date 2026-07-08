@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案說明
 
-這是 Ternence 開發的 Whisper 語音工具（v1.3.0），提供圖形化介面，支援 Mac 與 Windows。
+這是 Ternence 開發的 Whisper 語音工具（v1.4.0），提供圖形化介面，支援 Mac 與 Windows。
 
 ## 每次開啟先閱讀
 
@@ -51,7 +51,8 @@ cd Whisper_開發版_整理版
 ```
 
 依賴套件（`requirements-dev.txt`）：
-- `openai-whisper==20250625`
+- `openai-whisper==20250625`（fallback 引擎）
+- `faster-whisper>=1.1.0`（v1.4.0 起的**主要**轉錄引擎，CTranslate2 後端＋內建 Silero VAD）
 - `opencc-python-reimplemented>=0.1.7`（簡繁轉換）
 - `edge-tts>=7.2.8`（文字轉語音）
 - `demucs>=4.0.1`（歌詞辨識分頁的人聲分離）
@@ -67,8 +68,11 @@ cd Whisper_開發版_整理版
   - 轉錄、TTS、歌詞辨識都在背景 thread 執行，UI 不卡頓
   - 停止轉錄使用 `ctypes.pythonapi.PyThreadState_SetAsyncExc`（強制中止 thread）
   - 已載入的模型快取在 `self.model_cache` dict，避免重複載入
+- **轉錄引擎（v1.4.0 起）**：優先用 **faster-whisper**（`_FasterWhisperModel`），透過 `self._transcribe()` 統一入口分派；沒裝時自動退回 openai-whisper。兩條路徑都回傳同結構 dict（`language`/`text`/`segments`），後續繁化、去重、輸出流程完全共用。faster-whisper 模型快取在 `self.faster_model_cache`（與 openai 的 `self.model_cache` 分開），CPU 上用 `compute_type="int8"`
+- **VAD 去幻覺（v1.4.0 起，最關鍵）**：faster-whisper 開 `vad_filter=True` + Silero VAD，先切掉靜音段，講者走動/換場/沉默的空檔根本不進模型，從**源頭**消除「我只想說×45」那類靜音幻覺（語言選擇器、事後去重都治不了的根因）
+- **即時進度**：`_transcribe(..., progress_cb)` 逐段回報 `segment.end / info.duration`，狀態列顯示「轉錄中… 42%（00:25:30 / 01:00:12）」，長檔不再看起來像當機
 - **輸出格式**：`.txt`、`.srt`、`.vtt`，存放於與輸入檔同目錄，檔名格式為 `{原檔名}_{偵測語言}.{副檔名}`
-- **抗幻覺**：`_dedupe_repeated_segments()` 過濾靜音/配樂段落常見的 Whisper 連續重複幻覺（保留前 2 次出現，超過捨棄）；`.txt` 輸出為每個 segment 一行，不是整段無斷句字串
+- **抗幻覺（三層）**：① VAD 從源頭跳過靜音（見上）；② `_dedupe_repeated_segments()` 過濾重複幻覺，v1.4.0 升級為**兩層**——`_collapse_repeated_phrase()` 收斂「單一 segment 內部自我重複」（如整段 `我只想說,我只想說,…`），再擋「跨段連續重複」；③ `_clamp_segment_durations()` 把單塊字幕顯示時長夾在 `MAX_SUBTITLE_DURATION`（8 秒）內，避免 VAD 跳過靜音後最後一句 end 被拉到下一句開口（實測看過一塊被拉到 26 分鐘）害字幕掛在畫面上——只夾 srt/vtt 時間軸，不動文字與 `.txt`。`.txt` 輸出為每個 segment 一行，不是整段無斷句字串
 - **中文繁化**：偵測語言為中文時，使用 OpenCC config `s2twp` 轉為繁體中文（`_to_traditional`）
 - **歌詞辨識**（v1.3.0 新增）：選用 Demucs 分離人聲（`python -m demucs --two-stems=vocals --mp3`，子行程）再用 Whisper 辨識，輸出 `.txt`/`.lrc`/`.srt`
   - **務必使用 `--mp3` 輸出**（見下方技術決策，避免 torchaudio/torchcodec/ffmpeg ABI 版本地獄）
@@ -100,6 +104,8 @@ cd Whisper_開發版_整理版
 
 ## 重要技術決策
 
+- **v1.4.0 改用 faster-whisper 為主引擎（openai-whisper 保留為 fallback）**：舊版最大的痛點是講座/長檔在靜音、換場、測麥、閒聊等**沒有人聲**的段落產生大量重複幻覺（`我只想說×45`、`能夠 能夠 能夠`…），而且指定語言、`temperature=0`、事後去重都治不了根因。faster-whisper 內建 **Silero VAD**（`vad_filter=True`），把靜音段直接排除、不進模型，從源頭解決；同時底層是 **CTranslate2，完全不依賴 torch**，剛好避開下面 demucs 那串 torch/torchaudio/torchcodec/ffmpeg ABI 地獄，字幕這條路更穩、更好打包。實作上用 `self._transcribe()` 統一分派，faster-whisper 缺席時自動 `import` 失敗→退回 openai-whisper，確保任何環境都能跑。附帶修掉一個舊 bug：`temperature` 原本寫死 `0.0`（單一值）會讓 `compression_ratio_threshold` 的「升溫重試」失效，改回 fallback 序列 `(0.0, 0.2, …, 1.0)` 門檻才真正生效。
+- **VAD 造成的字幕超長顯示 → `_clamp_segment_durations()`**：開 VAD 後，被跳過的靜音空檔會讓「空檔前最後一句」的 `end` 被拉長到下一句開口為止（實測一塊 26 分鐘）。用 `MAX_SUBTITLE_DURATION=8` 秒夾住 `end`，該空檔變成無字幕（正確），只影響 srt/vtt 時間軸、不動文字與 `.txt`。
 - **SSL 信任作業系統憑證庫（`pip-system-certs`）**：公司網路的防火牆/防毒會對 HTTPS 做 SSL 檢查並用自己的自簽憑證，macOS/Windows 系統本身信任這張憑證，但 Python 預設不信任，導致下載 Whisper/Demucs 模型時出現 `CERTIFICATE_VERIFY_FAILED`。`pip-system-certs` 透過 `.pth` 在解譯器啟動時自動套用，**不需要任何程式碼配合**，而且涵蓋 `subprocess` 啟動的子行程（例如歌詞辨識叫用的 `python -m demucs`）。之前用 `truststore.inject_into_ssl()` 手動注入只能保護呼叫的那個程序本身，沒辦法保護 demucs 子行程，2026-06-29 已全面換成 `pip-system-certs`，三個版本都移除了手動 inject 的程式碼，純粹靠這個套件存在於 venv 裡生效。
 - **Demucs 輸出務必用 `--mp3`，不要用預設 `.wav`**：demucs 預設輸出 wav 會呼叫 `torchaudio.save()`，新版 torchaudio 把 wav 存檔的後端換成 `torchcodec`，而 `torchcodec` 需要對應 ABI 版本的 ffmpeg 動態函式庫（例如 libavutil.56），但 Homebrew 的 `ffmpeg` formula 一直追最新版（2026-06 已到 ffmpeg 8.x），版本對不上會出現 `Library not loaded: @rpath/libavutil.56.dylib`。改用 `--mp3` 輸出會走 demucs 自己的 `lameenc` 編碼器，完全不經過 torchaudio/torchcodec，不需要額外裝 `torchcodec`，也不受 Homebrew ffmpeg 版本影響。
 - **轉錄結尾幻覺重複**：`_dedupe_repeated_segments()` 過濾掉同一句話連續重複超過 2 次的 segment（去標點後比對），這是 Whisper 在靜音/配樂段落常見的幻覺，跟語言誤判是不同的成因，語言選擇器解決不了這種情況。
@@ -112,9 +118,11 @@ cd Whisper_開發版_整理版
 1. 在 `Whisper_開發版_整理版/whisper_gui.py` 完成修改
 2. 同步到 Mac 版：`cp whisper_gui.py ../Whisper_Mac_一鍵安裝版/_internal/whisper_gui_mac.py`
 3. 同步到 Win 版：`cp whisper_gui.py ../Whisper_Windows_一鍵安裝版/_internal/whisper_gui_win.py`，然後將 `_configure_runtime_environment` 替換為 Windows 版本
-4. 更新 `APP_VERSION` 字串（三個檔案）
-5. 更新各 README 與本 CLAUDE.md 的版本資訊
-6. 執行清理腳本後打包發佈
+   - Mac 版與開發版的 `_configure_runtime_environment` **相同**，整檔覆蓋即可；只有 Windows 版這個函式不同（搜尋 `ffmpeg/` 子目錄並確認 `ffprobe.exe`）。同步後用 `diff mac win` 確認差異**只落在這個函式內**。
+4. 若有動到依賴：三份 `requirements-*.txt`（`requirements-dev.txt`／`requirements-mac.txt`／`requirements-win.txt`）都要同步加同一個套件（例如 v1.4.0 的 `faster-whisper>=1.1.0`）
+5. 更新 `APP_VERSION` 字串（三個檔案）
+6. 更新各 README 與本 CLAUDE.md 的版本資訊
+7. 執行清理腳本後打包發佈
 
 ## 版本間差異
 

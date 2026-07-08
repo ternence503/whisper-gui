@@ -1,4 +1,8 @@
 openai-whisper==20250625
+# faster-whisper: CTranslate2 backend with built-in Silero VAD — removes silence
+# hallucinations at the source, faster, lower memory, and torch-free. The app prefers
+# it and automatically falls back to openai-whisper if it cannot be imported.
+faster-whisper>=1.1.0
 opencc-python-reimplemented>=0.1.7
 edge-tts>=7.2.8
 demucs>=4.0.1

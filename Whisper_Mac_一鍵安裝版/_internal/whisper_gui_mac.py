@@ -23,6 +23,15 @@ except ModuleNotFoundError as exc:
 
 import whisper
 try:
+    # faster-whisper（CTranslate2 後端）：內建 Silero VAD，可從源頭去掉靜音幻覺，
+    # 且不依賴 torch，速度更快、記憶體更省。裝不起來時自動退回原版 openai-whisper。
+    from faster_whisper import WhisperModel as _FasterWhisperModel
+except Exception:  # pragma: no cover
+    _FasterWhisperModel = None
+
+FASTER_WHISPER_AVAILABLE = _FasterWhisperModel is not None
+
+try:
     from opencc import OpenCC
 except Exception:  # pragma: no cover
     OpenCC = None
@@ -45,7 +54,7 @@ MEDIA_FILE_PATTERNS = (
 )
 
 APP_AUTHOR = "Ternence"
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.4.0"
 APP_SIGNATURE = f"{APP_AUTHOR} {APP_VERSION}"
 TTS_VOICE_OPTIONS: Dict[str, str] = {
     # 台灣腔
@@ -100,12 +109,23 @@ def _ensure_stdio() -> None:
         sys.stderr = _SilentStream()
 
 
+# temperature 用 fallback 序列（不是單一 0.0）：只有給多個溫度，Whisper 才會在
+# compression_ratio / logprob 判定為幻覺時「升溫重試」，門檻才真正生效；
+# 若寫死 0.0 等於沒有退避溫度，壓縮比門檻形同虛設，這是舊版幻覺沒擋掉的主因之一。
+TRANSCRIBE_TEMPERATURE = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+
 DEFAULT_OPTIONS = {
-    "temperature": 0.0,
+    "temperature": TRANSCRIBE_TEMPERATURE,
     "condition_on_previous_text": False,
     "no_speech_threshold": 0.4,
     "compression_ratio_threshold": 2.0,
 }
+
+# faster-whisper 的 Silero VAD 參數：靜音超過這個長度才切段，避免把正常停頓也吃掉。
+VAD_PARAMETERS = {"min_silence_duration_ms": 500}
+
+# CPU 上用 int8 量化：速度快、記憶體省，實測對中文辨識品質影響可忽略。
+FASTER_COMPUTE_TYPE = "int8"
 
 
 def _format_timestamp(seconds: float, *, separator: str) -> str:
@@ -119,6 +139,14 @@ def _format_timestamp(seconds: float, *, separator: str) -> str:
     if separator == ",":
         return f"{hours:02}:{minutes:02}:{sec:02},{ms:03}"
     return f"{hours:02}:{minutes:02}:{sec:02}.{ms:03}"
+
+
+def _format_hms(seconds: float) -> str:
+    """把秒數格式化成 HH:MM:SS，用於轉錄進度顯示。"""
+    total = int(max(0.0, float(seconds or 0.0)))
+    hours, rem = divmod(total, 3600)
+    minutes, sec = divmod(rem, 60)
+    return f"{hours:02}:{minutes:02}:{sec:02}"
 
 
 def _format_srt(segments: Iterable[Dict[str, float]]) -> str:
@@ -166,21 +194,85 @@ def _format_lrc(segments: Iterable[Dict[str, float]]) -> str:
 
 
 _REPEAT_STRIP_PATTERN = re.compile(r"[\s,，。！？!?.、]")
+_SEP_PATTERN = re.compile(r"[,，、\s]")
+
+# 字幕單塊最長顯示秒數。開了 VAD 後，靜音段被跳過，跳過前的最後一句 end 會被
+# 拉長到下一句開口為止（實測看過一塊被拉到 26 分鐘），字幕會一直卡在畫面上。
+# 這裡把過長的 end 夾住，該靜音空檔就變成沒字幕（正確），不影響文字內容與 txt。
+MAX_SUBTITLE_DURATION = 8.0
+
+
+def _clamp_segment_durations(
+    segments: Iterable[Dict[str, object]], max_dur: float = MAX_SUBTITLE_DURATION
+) -> List[Dict[str, object]]:
+    """夾住每塊字幕的顯示時長，避免 VAD 靜音空檔造成字幕掛在畫面上好幾分鐘。
+
+    只縮短過長的 end（不動 start、不動文字），所以不會產生時間軸重疊，
+    也不會漏字；被夾掉的那段空檔本來就是沒有人聲的靜音，無字幕才正確。
+    """
+    clamped: List[Dict[str, object]] = []
+    for seg in segments:
+        try:
+            start = float(seg.get("start", 0.0) or 0.0)
+            end = float(seg.get("end", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            clamped.append(seg)
+            continue
+        if end - start > max_dur:
+            seg = dict(seg)
+            seg["end"] = start + max_dur
+        clamped.append(seg)
+    return clamped
+
+
+def _collapse_repeated_phrase(text: str, keep: int = 2) -> str:
+    """收斂「單一段落內部」自我重複的幻覺，例如
+    「我只想說,我只想說,…（重複 45 次）」或「能夠能夠能夠」「小小的小小的」。
+
+    做法：去掉分隔符後找出從頭連續鋪滿整段的最短重複單元，若重複次數過多
+    （且覆蓋整段 8 成以上），就收斂成 keep 次。太短的字串（<8 字）不處理，
+    避免誤傷正常的疊字（例如「謝謝」「好好」）。
+    """
+    stripped = str(text or "").strip()
+    core = _REPEAT_STRIP_PATTERN.sub("", stripped)
+    n = len(core)
+    if n < 8:
+        return stripped
+    had_sep = bool(_SEP_PATTERN.search(stripped))
+    for unit_len in range(1, min(n // 3, 12) + 1):
+        unit = core[:unit_len]
+        reps = 0
+        idx = 0
+        while core[idx:idx + unit_len] == unit:
+            reps += 1
+            idx += unit_len
+        # reps 夠多且連續重複部分覆蓋整段 8 成以上，才判定為幻覺循環
+        if reps >= keep + 1 and idx >= n * 0.8:
+            if had_sep:
+                return "，".join([unit] * keep)
+            return unit * keep
+    return stripped
 
 
 def _dedupe_repeated_segments(
     segments: Iterable[Dict[str, object]], max_repeats: int = 2
 ) -> List[Dict[str, object]]:
-    """過濾靜音/配樂段落常見的 Whisper 幻覺：同一句話連續重複數十次。
+    """兩層過濾 Whisper 在靜音/配樂段落的重複幻覺：
 
-    保留每段重複文字的前 max_repeats 次出現，超過的直接捨棄，
-    這樣正常的歌詞疊句或口語重複（通常 1~2 次）不會被誤殺。
+    1. 段內自我重複：單一 segment 文字自己重複數十次 → 收斂成 max_repeats 次。
+    2. 跨段連續重複：相鄰 segment 文字相同且連續超過 max_repeats 次 → 捨棄多餘的。
+
+    正常的歌詞疊句或口語重複（通常 1~2 次）不會被誤殺。
     """
     deduped: List[Dict[str, object]] = []
     run_key: Optional[str] = None
     run_count = 0
     for seg in segments:
-        text = str(seg.get("text", "") or "").strip()
+        raw_text = str(seg.get("text", "") or "").strip()
+        text = _collapse_repeated_phrase(raw_text, keep=max_repeats)
+        if text != raw_text:
+            seg = dict(seg)
+            seg["text"] = text
         key = _REPEAT_STRIP_PATTERN.sub("", text)
         if key and key == run_key:
             run_count += 1
@@ -241,6 +333,7 @@ class WhisperApp:
         self.root.geometry("860x820")
         self.root.minsize(720, 600)
         self.model_cache: Dict[str, whisper.Whisper] = {}
+        self.faster_model_cache: Dict[str, object] = {}
         self.stop_event = threading.Event()
         self.worker_thread: Optional[threading.Thread] = None
         self.tts_stop_event = threading.Event()
@@ -644,10 +737,6 @@ class WhisperApp:
             else:
                 self._update_lyrics_status("載入模型中...")
 
-            if model_name not in self.model_cache:
-                self.model_cache[model_name] = whisper.load_model(model_name, device="cpu")
-            model = self.model_cache[model_name]
-
             if self.lyrics_stop_event.is_set():
                 raise SystemExit
 
@@ -657,7 +746,15 @@ class WhisperApp:
             if lang_selection != "自動偵測":
                 opts["language"] = lang_selection.split("(")[-1].rstrip(")")
 
-            raw_result = model.transcribe(vocal_path, fp16=False, verbose=False, **opts)
+            def _lyrics_progress(cur: float, total: float) -> None:
+                pct = int(cur / total * 100) if total else 0
+                self._update_lyrics_status(
+                    f"辨識歌詞中… {pct}%（{_format_hms(cur)} / {_format_hms(total)}）"
+                )
+
+            raw_result = self._transcribe(
+                vocal_path, model_name, opts, self.lyrics_stop_event, _lyrics_progress
+            )
             result = self._normalize_chinese_output(raw_result)
 
             if self.lyrics_stop_event.is_set():
@@ -696,6 +793,7 @@ class WhisperApp:
         # 歌詞的副歌/疊句正常就會重複 3~6 次，門檻要比語音轉字幕（預設 2 次）寬鬆，
         # 只擋真正失控的幻覺循環（實測過的案例是連續 14 次），不要誤刪真正的副歌歌詞
         segments = _dedupe_repeated_segments(result.get("segments", []) or [], max_repeats=8)
+        segments = _clamp_segment_durations(segments)
 
         text_lines = [str(seg.get("text", "") or "").strip() for seg in segments]
         text_lines = [line for line in text_lines if line]
@@ -1029,6 +1127,100 @@ class WhisperApp:
             self._update_status(f"第一次使用 {model_name} 模型（CPU），正在載入...")
             self.model_cache[model_name] = whisper.load_model(model_name, device="cpu")
         return self.model_cache[model_name]
+
+    def _get_faster_model(self, model_name: str) -> object:
+        if model_name not in self.faster_model_cache:
+            self._update_status(
+                f"第一次使用 {model_name} 模型（faster-whisper CPU），正在載入..."
+            )
+            self.faster_model_cache[model_name] = _FasterWhisperModel(
+                model_name, device="cpu", compute_type=FASTER_COMPUTE_TYPE
+            )
+        return self.faster_model_cache[model_name]
+
+    def _transcribe(
+        self,
+        audio_path: str,
+        model_name: str,
+        options: Dict[str, object],
+        stop_event: Optional[threading.Event] = None,
+        progress_cb: Optional[callable] = None,
+    ) -> Dict[str, object]:
+        """統一的轉錄入口：優先用 faster-whisper（含 VAD），否則退回 openai-whisper。
+
+        兩條路徑都回傳同樣結構的 dict（language / text / segments），
+        後續的繁化、去重、輸出流程完全不用改。
+        progress_cb(current_sec, total_sec) 用來即時回報進度（只有 faster-whisper 支援）。
+        """
+        if FASTER_WHISPER_AVAILABLE:
+            return self._faster_transcribe(
+                audio_path, model_name, options, stop_event, progress_cb
+            )
+        model = self._get_model(model_name)
+        return model.transcribe(audio_path, fp16=False, verbose=False, **options)
+
+    def _faster_transcribe(
+        self,
+        audio_path: str,
+        model_name: str,
+        options: Dict[str, object],
+        stop_event: Optional[threading.Event] = None,
+        progress_cb: Optional[callable] = None,
+    ) -> Dict[str, object]:
+        """用 faster-whisper 轉錄，並把結果轉成 openai-whisper 的 dict 結構。
+
+        關鍵是 vad_filter=True：先用 Silero VAD 切掉靜音段，講者走動/換場/沉默
+        的空檔根本不進模型，從源頭消除「我只想說×45」那類靜音幻覺。
+        """
+        opts = dict(options)
+        language = opts.get("language")
+        word_timestamps = bool(opts.get("word_timestamps", False))
+        model = self._get_faster_model(model_name)
+        segments_gen, info = model.transcribe(
+            audio_path,
+            language=language,
+            temperature=opts.get("temperature", TRANSCRIBE_TEMPERATURE),
+            condition_on_previous_text=opts.get("condition_on_previous_text", False),
+            no_speech_threshold=opts.get("no_speech_threshold", 0.4),
+            compression_ratio_threshold=opts.get("compression_ratio_threshold", 2.0),
+            log_prob_threshold=opts.get("logprob_threshold", -1.0),
+            vad_filter=True,
+            vad_parameters=VAD_PARAMETERS,
+            word_timestamps=word_timestamps,
+            beam_size=5,
+        )
+
+        total_dur = float(getattr(info, "duration", 0.0) or 0.0)
+        segments: List[Dict[str, object]] = []
+        text_parts: List[str] = []
+        for seg in segments_gen:  # 惰性 generator，實際運算在這裡逐段發生
+            if stop_event is not None and stop_event.is_set():
+                raise SystemExit
+            seg_dict: Dict[str, object] = {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+            }
+            if word_timestamps and getattr(seg, "words", None):
+                seg_dict["words"] = [
+                    {
+                        "word": w.word,
+                        "start": w.start,
+                        "end": w.end,
+                        "probability": w.probability,
+                    }
+                    for w in seg.words
+                ]
+            segments.append(seg_dict)
+            text_parts.append(seg.text)
+            if progress_cb is not None and total_dur > 0:
+                progress_cb(min(float(seg.end or 0.0), total_dur), total_dur)
+
+        return {
+            "language": info.language,
+            "text": "".join(text_parts),
+            "segments": segments,
+        }
 
     def _build_options(self, word_timestamps: bool) -> Dict[str, object]:
         opts: Dict[str, object] = dict(DEFAULT_OPTIONS)
@@ -1590,10 +1782,18 @@ class WhisperApp:
         self, audio_path: str, model_name: str, word_timestamps: bool
     ) -> None:
         try:
-            model = self._get_model(model_name)
             self._update_status("轉錄中（使用 CPU），處理時間取決於檔案長度與模型大小...")
             options = self._build_options(word_timestamps)
-            raw_result = model.transcribe(audio_path, fp16=False, verbose=False, **options)
+
+            def _progress(cur: float, total: float) -> None:
+                pct = int(cur / total * 100) if total else 0
+                self._update_status(
+                    f"轉錄中… {pct}%（{_format_hms(cur)} / {_format_hms(total)}）"
+                )
+
+            raw_result = self._transcribe(
+                audio_path, model_name, options, self.stop_event, _progress
+            )
             result = self._normalize_chinese_output(raw_result)
             if self.stop_event.is_set():
                 raise SystemExit
@@ -1625,6 +1825,8 @@ class WhisperApp:
         suffix = detected_lang
 
         segments = _dedupe_repeated_segments(result.get("segments", []) or [])
+        # 夾住過長字幕（VAD 靜音空檔造成的），只影響 srt/vtt 時間軸，不影響 txt 文字
+        segments = _clamp_segment_durations(segments)
 
         text_lines = [str(seg.get("text", "") or "").strip() for seg in segments]
         text_lines = [line for line in text_lines if line]
