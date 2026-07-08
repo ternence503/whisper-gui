@@ -1,7 +1,7 @@
 # Whisper 語音工具
 
 本地執行的語音工具，附圖形介面，小白也能輕鬆使用。
-作者：Ternence｜版本：v1.2.0
+作者：Ternence｜版本：v1.4.0
 
 ---
 
@@ -9,8 +9,8 @@
 
 | 平台 | 下載連結 |
 |------|---------|
-| **Mac** | [**下載 Mac 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Mac_._v1.2.0.zip) |
-| **Windows** | [**下載 Windows 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Windows_._v1.2.0.zip) |
+| **Mac** | [**下載 Mac 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Mac_._v1.4.0.zip) |
+| **Windows** | [**下載 Windows 版 →**](https://github.com/ternence503/whisper-gui/releases/latest/download/Whisper_Windows_._v1.4.0.zip) |
 
 > 下載後解壓縮，雙擊「▶ 啟動 Whisper」即可。第一次會自動安裝環境（需連網），之後直接開啟。
 
@@ -24,6 +24,12 @@
 - 輸出 `.txt`、`.srt`、`.vtt` 三種格式
 - 純 CPU 執行，不需 GPU
 - 模型下載一次後，之後不需網路
+- **v1.4.0 大幅抗幻覺**：改用 faster-whisper + 語音偵測（VAD），講座、會議這類長檔在靜音／換場段落不再出現大量重複亂碼；辨識更快、更省記憶體
+- 轉錄時顯示**即時進度**（百分比與時間），長檔不再看起來像當機
+
+### 歌詞辨識（完全離線）
+- 選用 Demucs 分離人聲、去除背景音樂，提升歌詞辨識準確率
+- 輸出 `.txt` 純歌詞、`.lrc` 帶時間戳歌詞、`.srt` 字幕
 
 ### 文字轉語音（需網路）
 - 12 種聲音，分為三組：
@@ -98,6 +104,16 @@
 ---
 
 ## 版本紀錄
+
+### v1.4.0（2026-07-08）
+- **轉錄引擎升級 faster-whisper + VAD（語音活動偵測）**：中文長檔（講座、會議、訪談）在靜音、換場、沉默段落的重複幻覺大幅減少
+- 辨識速度更快、記憶體佔用更低
+- 轉錄時顯示即時進度（百分比與時間）
+- 字幕顯示時長自動夾住，避免靜音空檔造成某句字幕長時間卡在畫面上
+- 建議：中文長檔用 medium 模型並在語言選單指定「繁體中文」，品質最穩
+
+### v1.3.0
+- 新增「歌詞辨識」分頁：Demucs 分離人聲後辨識，輸出 `.txt` / `.lrc` / `.srt`
 
 ### v1.2.0（2026-03-26）
 - 單一啟動按鈕（▶ 啟動 Whisper），首次安裝與之後啟動都用同一個
